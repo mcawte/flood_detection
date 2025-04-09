@@ -14,6 +14,8 @@ from timm.models._builder import build_model_with_cfg
 from timm.models._registry import generate_default_cfgs, register_model
 from torch import nn
 
+print("✅ Custom granite_geospatial_uki module loaded")
+
 
 class S1HLSBands(Enum):
     BLUE = "BLUE"
@@ -112,6 +114,8 @@ def _create_prithvi(
 
     kwargs["in_chans"] = len(model_bands)
 
+    print(f"✅ _create_prithvi called with in_chans={kwargs['in_chans']}")
+
     def checkpoint_filter_wrapper_fn(state_dict, model):
         return checkpoint_filter_fn(state_dict, model, pretrained_bands, model_bands)
 
@@ -173,7 +177,7 @@ def create_granite_geospatial_uki(
     }
     model = _create_prithvi(
         model_name,
-        pretrained=pretrained,
+        pretrained=False,
         model_bands=bands,
         pretrained_bands=pretrained_bands,
         **dict(model_args, **kwargs),

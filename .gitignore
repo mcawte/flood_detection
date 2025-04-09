@@ -121,8 +121,8 @@ cython_debug/
 
 # Project Specific Ignores
 data/
-models/*.ckpt
-models/config_*.yaml # Ignore specific model config if needed, adjust pattern if necessary
+app/models/*.ckpt
+app/models/*.pt
 geospatial/data/ # Explicitly ignore data within geospatial if it exists
 geospatial/configs/ # From geospatial/.gitignore
 geospatial/plots/ # From geospatial/.gitignore

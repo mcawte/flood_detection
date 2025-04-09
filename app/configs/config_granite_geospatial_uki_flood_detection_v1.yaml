@@ -24,8 +24,8 @@ trainer:
 data:
   class_path: GenericNonGeoSegmentationDataModule
   init_args:
-    batch_size: 16
-    num_workers: 1
+    batch_size: 1
+    num_workers: 0
     constant_scale: 0.0001
     dataset_bands: # what bands are in your data 
       - VV
@@ -94,7 +94,7 @@ model:
     model_args:
       decoder: FCNDecoder
       backbone_pretrained: false
-      backbone: granite_geospatial_uki      
+      backbone: granite_geospatial_uki
       backbone_pretrain_img_size: 512
       decoder_channels: 256
       backbone_bands:

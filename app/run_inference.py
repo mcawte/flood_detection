@@ -1,26 +1,53 @@
 import subprocess
 import argparse
 import sys
+import rioxarray
+import numpy as np
 
+from glob import glob
+
+files = sorted(glob("/app/data/input/*.tif"))
+print(f"Found {len(files)} .tif files")
+for f in files:
+    try:
+        arr = rioxarray.open_rasterio(f, masked=True)
+        print(
+            f"{f}: shape={arr.shape}, dtype={arr.dtype}, "
+            f"NaNs={np.isnan(arr).sum().item()}"
+        )
+    except Exception as e:
+        print(f"Error loading {f}: {e}")
+ 
 print("Starting inference script inside container...")
-
+input_tif = "/app/data/input/EMSR407_AOI_3_2019-11-14_tile_0_2_test_image.tif"
+print(rioxarray.open_rasterio(input_tif).shape)
+arr = rioxarray.open_rasterio(input_tif, masked=True)
+print(np.isnan(arr).sum().item())
+ 
 # --- Argument Parsing ---
 parser = argparse.ArgumentParser(
     description="Run Terratorch inference inside Docker."
 )
 parser.add_argument(
-    '--config', required=True, help='Path inside container to config.yaml'
+    '--config',
+    default='/app/configs/'
+            'config_granite_geospatial_uki_flood_detection_v1.yaml',
+    help='Path inside container to config.yaml'
 )
 parser.add_argument(
-    '--checkpoint', required=True, help='Path inside container to model.ckpt'
+    '--checkpoint',
+    default='/app/models/granite_geospatial_uki_flood_detection_v1.ckpt',
+    help='Path inside container to model.ckpt'
 )
 parser.add_argument(
-    '--input_dir', required=True,
+    '--input_dir',
+    default='/app/data/input',
     help='Path inside container to the input data root directory '
          '(parent of image files)'
 )
 parser.add_argument(
-    '--output_dir', required=True,
+    '--output_dir',
+    default='/app/data/output',
     help='Path inside container for prediction output'
 )
 # Add accelerator argument
@@ -39,7 +66,7 @@ print(f"Accelerator: {args.accelerator}")
 # --- Terratorch Command Construction ---
 # We need to run terratorch from the directory containing 'custom_modules'
 # Assuming the project code is copied to /app/uki-flooddetection
-project_code_dir = "/app/uki-flooddetection"
+project_code_dir = "/app"
 predict_script = "terratorch"  # Assuming terratorch is in the PATH
 
 command = [
@@ -49,6 +76,7 @@ command = [
     "--ckpt_path", args.checkpoint,
     "--predict_output_dir", args.output_dir,
     "--data.init_args.predict_data_root", args.input_dir,
+    "--data.init_args.img_grep", "*.tif",
     f"--trainer.accelerator={args.accelerator}",  # Control CPU/GPU
     "--trainer.devices=1",  # Specify number of devices (1 for CPU/single GPU)
     "--data.init_args.batch_size=1"  # Override batch size for prediction
