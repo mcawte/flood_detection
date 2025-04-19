@@ -126,6 +126,8 @@ app/models/*.pt
 geospatial/data/ # Explicitly ignore data within geospatial if it exists
 geospatial/configs/ # From geospatial/.gitignore
 geospatial/plots/ # From geospatial/.gitignore
+/uki/
+/azure/
 
 # Large files or potentially sensitive info
 *.tar.gz
