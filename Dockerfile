@@ -32,5 +32,11 @@ RUN mkdir -p /app/data/input /app/data/output /app/configs /app/models && chmod 
 # Copy only necessary files
 COPY ./app /app
 
-# Set the command
-CMD ["python3", "mcp_server.py"]
+# Install socat
+RUN apt-get update && apt-get install -y socat
+
+# Expose MCP over TCP
+EXPOSE 8080
+
+# Start MCP server via socat TCP->stdio bridge
+CMD ["socat", "TCP-LISTEN:8080,reuseaddr,fork", "EXEC:'python3 /app/mcp_server.py'"]
