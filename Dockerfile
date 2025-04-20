@@ -1,8 +1,9 @@
 FROM osgeo/gdal:ubuntu-small-3.6.3
 
-# Install Python and essential packages
-RUN apk add --no-cache python3 py3-pip git build-base python3-dev && \
-    pip3 install --no-cache-dir --upgrade pip setuptools wheel
+# Install Python and essential build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip python3-dev git build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
 ENV PYTHONPATH="/app"
