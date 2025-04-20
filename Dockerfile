@@ -62,9 +62,19 @@ RUN pip install torch==2.1.0 torchvision==0.16.0 \
     matplotlib \
     imagecodecs \
     global_land_mask \
-    "numpy<2"
+    "numpy<2" \
+    fastapi \
+    uvicorn[standard] \
+    python-multipart \
+    rioxarray \
+    mcp \
+    requests
 
-
+# Copy application code (ensure mcp_server.py is included)
+COPY ./app /app/app
+COPY ./configs /app/configs
+COPY ./models /app/models
+COPY mcp_server.py /app/mcp_server.py
 
 # Create directories expected by the target structure that might not be copied
 # (fine_tuning, regions, plots based on the ls output)
@@ -72,5 +82,5 @@ RUN mkdir -p \
     /app/data/input \
     /app/data/output
 
-
-CMD ["python", "/app/run_inference.py"]
+# Change the CMD to run the Uvicorn server
+CMD ["python", "/app/mcp_server.py"]

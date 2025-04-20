@@ -128,6 +128,7 @@ geospatial/configs/ # From geospatial/.gitignore
 geospatial/plots/ # From geospatial/.gitignore
 /uki/
 /azure/
+/openshift/
 
 # Large files or potentially sensitive info
 *.tar.gz
