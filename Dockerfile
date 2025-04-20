@@ -35,5 +35,9 @@ COPY ./app /app
 # Expose MCP over TCP
 EXPOSE 8080
 
+# Set env vars for MCP server
+ENV PORT=8080
+ENV HOST=0.0.0.0
+
 # Start MCP server
 CMD ["python3", "mcp_server.py"]
