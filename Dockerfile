@@ -18,9 +18,8 @@ RUN wget https://download.osgeo.org/proj/proj-9.2.1.tar.gz \
     && make install \
     && ldconfig \
     && cd /tmp \
-    && rm -rf proj-9.2.1* \
-    && rm proj-9.2.1.tar.gz
-
+    && rm -rf proj-9.2.1* proj-9.2.1.tar.gz
+    
 # Final stage
 FROM python:3.11-slim
 
