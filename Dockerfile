@@ -19,7 +19,7 @@ RUN wget https://download.osgeo.org/proj/proj-9.2.1.tar.gz \
     && ldconfig \
     && cd /tmp \
     && rm -rf proj-9.2.1* proj-9.2.1.tar.gz
-    
+
 # Final stage
 FROM python:3.11-slim
 
@@ -29,9 +29,10 @@ COPY --from=builder /usr/local/include/ /usr/local/include/
 COPY --from=builder /usr/local/share/proj/ /usr/local/share/proj/
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
 
-# Install runtime dependencies
+# Install runtime dependencies AND build dependencies needed for pip packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgdal-dev gdal-bin libgomp1 \
+    gcc g++ build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
@@ -63,6 +64,12 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     mcp \
     requests \
     boto3
+
+# Clean up build dependencies to reduce image size
+RUN apt-get update && apt-get remove -y gcc g++ build-essential && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
 WORKDIR /app
