@@ -72,7 +72,7 @@ def ensure_models_exist():
     # MinIO configuration (from your document)
     s3_client = boto3.client(
         's3',
-        endpoint_url='https://minio-console-ppe-multi-modal.apps.cluster-r8fxn.r8fxn.sandbox753.opentlc.com',
+        endpoint_url='https://minio-ppe-multi-modal.apps.cluster-r8fxn.r8fxn.sandbox753.opentlc.com',
         aws_access_key_id=os.environ.get('MINIO_ACCESS_KEY'),
         aws_secret_access_key=os.environ.get('MINIO_SECRET_KEY'),
         region_name='us-east-1'
