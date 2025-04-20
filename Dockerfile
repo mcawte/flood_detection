@@ -36,4 +36,4 @@ COPY ./app /app
 EXPOSE 8080
 
 # Start MCP server
-CMD ["python3", "mcp_server.py'"]
+CMD ["python3", "mcp_server.py"]
