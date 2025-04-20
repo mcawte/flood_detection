@@ -33,4 +33,4 @@ RUN mkdir -p /app/data/input /app/data/output /app/configs /app/models
 COPY ./app /app
 
 # Set the command
-CMD ["python3", "-m", "app.mcp_server"]
+CMD ["python3", "mcp_server.py"]
