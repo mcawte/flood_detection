@@ -32,7 +32,7 @@ COPY --from=builder /usr/local/bin/ /usr/local/bin/
 # Install runtime dependencies AND build dependencies needed for pip packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgdal-dev gdal-bin libgomp1 \
-    gcc g++ build-essential \
+    gcc g++ build-essential git \
     && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
@@ -66,7 +66,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     boto3
 
 # Clean up build dependencies to reduce image size
-RUN apt-get update && apt-get remove -y gcc g++ build-essential && \
+RUN apt-get update && apt-get remove -y gcc g++ build-essential git && \
     apt-get autoremove -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
