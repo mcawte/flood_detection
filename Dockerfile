@@ -1,4 +1,4 @@
-FROM osgeo/gdal:alpine-small-latest
+FROM osgeo/gdal:alpine-small-3.6.3
 
 # Install Python and essential build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
