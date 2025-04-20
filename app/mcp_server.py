@@ -59,11 +59,11 @@ def ensure_models_exist():
     """Download models from MinIO if they don't exist locally"""
     model_path = Path(
         "/app/models/granite_geospatial_uki_flood_detection_v1.ckpt")
-    config_path = Path(
-        "/app/configs/config_granite_geospatial_uki_flood_detection_v1.yaml")
+    # config_path = Path(
+    #     "/app/configs/config_granite_geospatial_uki_flood_detection_v1.yaml")
 
     # If models already exist, skip download
-    if model_path.exists() and config_path.exists():
+    if model_path.exists():  # and config_path.exists():
         print("Models and configs already exist locally")
         return
 
@@ -80,15 +80,15 @@ def ensure_models_exist():
 
     # Create directories if they don't exist
     os.makedirs("/app/models", exist_ok=True)
-    os.makedirs("/app/configs", exist_ok=True)
+    # os.makedirs("/app/configs", exist_ok=True)
 
     # Download model and config from MinIO
     try:
         bucket_name = 'flood-models'  # Change to your actual bucket name
         s3_client.download_file(
             bucket_name, 'granite_geospatial_uki_flood_detection_v1.ckpt', str(model_path))
-        s3_client.download_file(
-            bucket_name, 'config_granite_geospatial_uki_flood_detection_v1.yaml', str(config_path))
+        # s3_client.download_file(
+        #     bucket_name, 'config_granite_geospatial_uki_flood_detection_v1.yaml', str(config_path))
         print("Successfully downloaded models and configs")
     except Exception as e:
         print(f"Error downloading models: {e}")
