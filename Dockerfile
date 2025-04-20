@@ -27,7 +27,7 @@ RUN pip3 install --no-cache-dir "terratorch @ git+https://github.com/IBM/terrato
 
 # Create directory structure
 WORKDIR /app
-RUN mkdir -p /app/data/input /app/data/output /app/configs /app/models
+RUN mkdir -p /app/data/input /app/data/output /app/configs /app/models && chmod -R 777 /app/models /app/configs /app/data
 
 # Copy only necessary files
 COPY ./app /app
