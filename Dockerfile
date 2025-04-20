@@ -1,4 +1,4 @@
-FROM osgeo/gdal:ubuntu-small-latest
+FROM osgeo/gdal:alpine-small-latest
 
 # Install Python and essential build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
