@@ -32,12 +32,8 @@ RUN mkdir -p /app/data/input /app/data/output /app/configs /app/models && chmod 
 # Copy only necessary files
 COPY ./app /app
 
-# Expose MCP over TCP
+# Expose MCP over HTTP
 EXPOSE 8080
 
-# Set env vars for MCP server
-ENV PORT=8080
-ENV HOST=0.0.0.0
-
-# Start MCP server
+# Start MCP server with uvicorn
 CMD ["python3", "mcp_server.py"]

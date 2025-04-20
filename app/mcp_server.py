@@ -4,6 +4,7 @@ import os
 import base64
 import asyncio
 from mcp.server.fastmcp import FastMCP
+from uvicorn import run as uvicorn_run
 
 import inference  # assuming this is in the same /app folder
 
@@ -98,4 +99,8 @@ def ensure_models_exist():
 if __name__ == "__main__":
     print("🚀 Starting Flood Detection MCP Server...")
     ensure_models_exist()
-    mcp.run(transport="http")
+    # Create an ASGI app from the MCP server
+    app = mcp.sse_app()
+
+    # Run it with uvicorn
+    uvicorn_run(app, host="0.0.0.0", port=8080)
