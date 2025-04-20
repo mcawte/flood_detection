@@ -4,7 +4,7 @@ import os
 import mcp
 import base64
 import asyncio
-from app import inference  # Import the modified inference logic
+from . import inference  # Import the modified inference logic
 
 
 @mcp.tool()
