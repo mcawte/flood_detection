@@ -98,4 +98,4 @@ def ensure_models_exist():
 if __name__ == "__main__":
     print("🚀 Starting Flood Detection MCP Server...")
     ensure_models_exist()
-    mcp.run(transport="stdio")
+    mcp.run(transport="sse", host="0.0.0.0", port=8080)
