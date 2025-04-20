@@ -101,7 +101,7 @@ if __name__ == "__main__":
     ensure_models_exist()
     # Create an ASGI app with explicitly defined paths
     # Make the root path work for SSE connection
-    app = mcp.sse_app(sse_path="/", message_path="/messages")
+    app = mcp.sse_app()
 
     # Run it with uvicorn
     uvicorn_run(app, host="0.0.0.0", port=8080)
