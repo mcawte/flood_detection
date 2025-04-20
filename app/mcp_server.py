@@ -1,10 +1,14 @@
 from pathlib import Path
 import boto3
 import os
-import mcp
 import base64
 import asyncio
-import inference  # Import the modified inference logic
+from mcp.server.fastmcp import FastMCP
+
+import inference  # assuming this is in the same /app folder
+
+# Initialize the MCP server
+mcp = FastMCP("flood-detection")
 
 
 @mcp.tool()
@@ -91,13 +95,7 @@ def ensure_models_exist():
         raise
 
 
-# Add to your main function
 if __name__ == "__main__":
-    print("Starting Flood Detection MCP Server...")
-
-    # Ensure models exist before starting the server
+    print("🚀 Starting Flood Detection MCP Server...")
     ensure_models_exist()
-
-    mcp.add_tool(generate_flood_map)
-    mcp.serve()
-    print("Flood Detection MCP Server stopped.")
+    mcp.run(transport="stdio")
