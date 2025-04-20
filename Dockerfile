@@ -1,9 +1,8 @@
-FROM osgeo/gdal:alpine-small-3.6.3
+FROM osgeo/gdal:ubuntu-small-3.6.3
 
-# Install Python and essential packages including Pillow dependencies
-RUN apk add --no-cache python3 py3-pip git build-base python3-dev \
-    jpeg-dev zlib-dev freetype-dev lcms2-dev openjpeg-dev tiff-dev tk-dev tcl-dev \
-    && pip3 install --no-cache-dir --upgrade pip setuptools wheel
+# Install Python and essential packages
+RUN apk add --no-cache python3 py3-pip git build-base python3-dev && \
+    pip3 install --no-cache-dir --upgrade pip setuptools wheel
 
 # Set environment variables
 ENV PYTHONPATH="/app"
