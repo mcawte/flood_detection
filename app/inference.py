@@ -89,6 +89,7 @@ async def run_terratorch_inference(
             f"--trainer.accelerator={accelerator}",
             f"--trainer.devices={devices}",
             "--data.init_args.batch_size=1"
+            "--trainer.default_root_dir=/app/data"
         ]
 
         print(
