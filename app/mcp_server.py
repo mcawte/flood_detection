@@ -1,12 +1,36 @@
-from pathlib import Path
-import boto3
-import os
-import base64
-import asyncio
-from mcp.server.fastmcp import FastMCP
-from uvicorn import run as uvicorn_run
+# ---------------------------------------------------------------------
+# TEMPORARY MONKEY‑PATCH to avoid “before initialization” crashes
+# (remove as soon as you’re on mcp 1.7.0+)
+# ---------------------------------------------------------------------
+
+from mcp.server.session import ServerSession
+
+# keep a reference to the original
+_original_received_request = ServerSession._received_request
+
+
+async def _patched_received_request(self, *args, **kwargs):
+    try:
+        return await _original_received_request(self, *args, **kwargs)
+    except RuntimeError as e:
+        # swallow only the “before initialization was complete” error
+        if "before initialization was complete" in str(e):
+            return
+        # re‑raise anything else
+        raise
+
+# install the patch
+ServerSession._received_request = _patched_received_request
+# ---------------------------------------------------------------------
 
 import inference  # assuming this is in the same /app folder
+from uvicorn import run as uvicorn_run
+from mcp.server.fastmcp import FastMCP
+import asyncio
+import base64
+import os
+import boto3
+from pathlib import Path
 
 # Initialize the MCP server
 mcp = FastMCP("flood-detection")
