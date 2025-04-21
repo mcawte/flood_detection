@@ -88,7 +88,7 @@ async def run_terratorch_inference(
             "--data.init_args.img_grep", f"{temp_input_filename}",
             f"--trainer.accelerator={accelerator}",
             f"--trainer.devices={devices}",
-            "--data.init_args.batch_size=1"
+            "--data.init_args.batch_size=1",
             "--trainer.default_root_dir=/app/data"
         ]
 
