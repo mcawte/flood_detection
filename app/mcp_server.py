@@ -1,27 +1,27 @@
-# ---------------------------------------------------------------------
-# TEMPORARY MONKEY‑PATCH to avoid “before initialization” crashes
-# (remove as soon as you’re on mcp 1.7.0+)
-# ---------------------------------------------------------------------
+# # ---------------------------------------------------------------------
+# # TEMPORARY MONKEY‑PATCH to avoid “before initialization” crashes
+# # (remove as soon as you’re on mcp 1.7.0+)
+# # ---------------------------------------------------------------------
 
-from mcp.server.session import ServerSession
+# from mcp.server.session import ServerSession
 
-# keep a reference to the original
-_original_received_request = ServerSession._received_request
+# # keep a reference to the original
+# _original_received_request = ServerSession._received_request
 
 
-async def _patched_received_request(self, *args, **kwargs):
-    try:
-        return await _original_received_request(self, *args, **kwargs)
-    except RuntimeError as e:
-        # swallow only the “before initialization was complete” error
-        if "before initialization was complete" in str(e):
-            return
-        # re‑raise anything else
-        raise
+# async def _patched_received_request(self, *args, **kwargs):
+#     try:
+#         return await _original_received_request(self, *args, **kwargs)
+#     except RuntimeError as e:
+#         # swallow only the “before initialization was complete” error
+#         if "before initialization was complete" in str(e):
+#             return
+#         # re‑raise anything else
+#         raise
 
-# install the patch
-ServerSession._received_request = _patched_received_request
-# ---------------------------------------------------------------------
+# # install the patch
+# ServerSession._received_request = _patched_received_request
+# # ---------------------------------------------------------------------
 
 import inference  # assuming this is in the same /app folder
 from uvicorn import run as uvicorn_run
@@ -125,7 +125,8 @@ if __name__ == "__main__":
     ensure_models_exist()
     # Create an ASGI app with explicitly defined paths
     # Make the root path work for SSE connection
-    app = mcp.sse_app()
+    # app = mcp.sse_app()
+    app = mcp.run()
 
     # Run it with uvicorn
-    uvicorn_run(app, host="0.0.0.0", port=8080)
+    # uvicorn_run(app, host="0.0.0.0", port=8080)
