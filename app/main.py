@@ -272,3 +272,9 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     print("Shutting down...")
+
+# Add this at the end of the file to actually run the server when main.py is executed
+if __name__ == "__main__":
+    import uvicorn
+    print("Starting FastAPI server...")
+    uvicorn.run(app, host="0.0.0.0", port=8080)
