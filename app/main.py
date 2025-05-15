@@ -261,20 +261,52 @@ async def predict_flood_streaming(
         await file.close()
 
 
+def ensure_models_exist():
+    """Download models from MinIO if they don't exist locally"""
+    model_path = Path(CHECKPOINT_PATH)
+    
+    # If model already exists, skip download
+    if model_path.exists():
+        print("Model checkpoint already exists locally")
+        return
+
+    print("Downloading model checkpoint from MinIO...")
+
+    # Create directories if they don't exist
+    os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
+    
+    # Download model from MinIO
+    try:
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=MINIO_ENDPOINT,
+            aws_access_key_id=MINIO_ACCESS_KEY,
+            aws_secret_access_key=MINIO_SECRET_KEY,
+            region_name='us-east-1'
+        )
+        
+        bucket_name = 'flood-models'  # Change to your actual bucket name
+        s3_client.download_file(
+            bucket_name, 'granite_geospatial_uki_flood_detection_v1.ckpt', str(model_path))
+        print("Successfully downloaded model checkpoint")
+    except Exception as e:
+        print(f"Error downloading model: {e}")
+        raise
+
 @app.on_event("startup")
 async def startup_event():
     print("Starting up...")
     # Ensure MinIO credentials are available
     if not MINIO_ACCESS_KEY or not MINIO_SECRET_KEY:
         print("WARNING: MinIO credentials not found in environment. /predict-stream/ endpoint may not work.")
+    
+    # Ensure model checkpoint exists
+    try:
+        ensure_models_exist()
+    except Exception as e:
+        print(f"WARNING: Failed to download model checkpoint: {e}")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     print("Shutting down...")
-
-# Add this at the end of the file to actually run the server when main.py is executed
-if __name__ == "__main__":
-    import uvicorn
-    print("Starting FastAPI server...")
-    uvicorn.run(app, host="0.0.0.0", port=8080)
