@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 
-from .. import inference  # Import the inference logic module
+import inference  # Import the inference logic module
 
 router = APIRouter()
 
