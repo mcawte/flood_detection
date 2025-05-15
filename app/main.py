@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import boto3
 from pathlib import Path
-from .api import endpoints
+from app.api import endpoints
 import sys
 import torch
 
