@@ -41,9 +41,15 @@ def upload_to_minio(file_path: str, object_name: str) -> str:
         print(
             f"Uploading {file_path} to MinIO bucket '{MINIO_BUCKET}' as '{object_name}'")
         s3_client.upload_file(file_path, MINIO_BUCKET, object_name)
-        url = f"{MINIO_ENDPOINT}/{MINIO_BUCKET}/{object_name}"
-        print(f"File uploaded. URL: {url}")
-        return url
+
+        # Generate a presigned URL that expires in 1 hour (3600 seconds)
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': MINIO_BUCKET, 'Key': object_name},
+            ExpiresIn=3600
+        )
+        print(f"File uploaded. Shareable URL: {presigned_url}")
+        return presigned_url
     except Exception as e:
         print(f"Error uploading to MinIO: {e}", file=sys.stderr)
         raise gr.Error(f"Failed to upload result to MinIO: {e}")
@@ -177,7 +183,9 @@ def detect_flood(image_url: str) -> str:
         response = requests.get(image_url, stream=True)
         response.raise_for_status()  # Raise an exception for bad status codes
 
-        input_filename = "input.tif"
+        url_path = image_url.split('?')[0]
+        original_filename = url_path.split('/')[-1]
+        input_filename = original_filename if original_filename else "input.tif"
         input_filepath = input_dir / input_filename
 
         with open(input_filepath, "wb") as f:
