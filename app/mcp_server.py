@@ -2,15 +2,18 @@ import gradio as gr
 import os
 import base64
 import tempfile
+import requests
 # import shutil
 import subprocess
 from pathlib import Path
 import torch
+import sys
 
 # Define fixed paths from your container setup
 CONFIG_PATH = '/app/configs/config_granite_geospatial_uki_flood_detection_v1.yaml'
 CHECKPOINT_PATH = '/app/models/granite_geospatial_uki_flood_detection_v1.ckpt'
 PROJECT_CODE_DIR = "/app"
+
 
 def run_terratorch_inference(input_dir: str, output_dir: str, input_filename: str) -> str:
     """
@@ -53,36 +56,39 @@ def run_terratorch_inference(input_dir: str, output_dir: str, input_filename: st
         output_filepath = Path(output_dir) / expected_output_filename
 
         if not output_filepath.exists():
-            raise FileNotFoundError(f"Inference finished, but output file '{output_filepath}' was not found.")
-            
+            raise FileNotFoundError(
+                f"Inference finished, but output file '{output_filepath}' was not found.")
+
         return str(output_filepath)
 
     except subprocess.CalledProcessError as e:
-        print(f"Terratorch predict command failed with exit code {e.returncode}.", file=sys.stderr)
+        print(
+            f"Terratorch predict command failed with exit code {e.returncode}.", file=sys.stderr)
         print("STDOUT:", e.stdout)
         print("STDERR:", e.stderr)
-        raise gr.Error(f"Model inference failed. Check logs for details. STDERR: {e.stderr}")
+        raise gr.Error(
+            f"Model inference failed. Check logs for details. STDERR: {e.stderr}")
     except Exception as e:
         print(f"An error occurred during inference: {e}", file=sys.stderr)
         raise gr.Error(f"An unexpected error occurred: {e}")
 
 
-def detect_flood(base64_tiff_string: str) -> str:
+def detect_flood(image_url: str) -> str:
     """
-    Performs flood detection on a base64 encoded GeoTIFF image.
+    Performs flood detection on a GeoTIFF image provided via a URL.
 
     Args:
-        base64_tiff_string (str): A base64 encoded string of a GeoTIFF image. It can be prefixed with a data URI like 'data:image/tiff;base64,'.
+        image_url (str): A public URL pointing to a GeoTIFF image.
 
     Returns:
         str: The file path to the resulting prediction image, which shows flood areas.
     """
-    if not base64_tiff_string:
-        raise gr.Error("Input is empty. Please provide a base64 encoded TIFF string.")
+    if not image_url:
+        raise gr.Error("Input is empty. Please provide a URL to a TIFF image.")
 
     # Create a temporary directory for processing this request
     temp_dir = tempfile.mkdtemp(prefix="flood_detect_")
-    
+
     try:
         temp_dir_path = Path(temp_dir)
         input_dir = temp_dir_path / "input"
@@ -90,23 +96,21 @@ def detect_flood(base64_tiff_string: str) -> str:
         input_dir.mkdir()
         output_dir.mkdir()
 
-        # Decode the base64 string and save as a .tif file
-        # This handles strings with or without the 'data:image/tiff;base64,' prefix
-        if "," in base64_tiff_string:
-            _, encoded = base64_tiff_string.split(",", 1)
-        else:
-            encoded = base64_tiff_string
+        # Download the image from the URL
+        print(f"Downloading image from: {image_url}")
+        response = requests.get(image_url, stream=True)
+        response.raise_for_status()  # Raise an exception for bad status codes
 
-        image_bytes = base64.b64decode(encoded)
         input_filename = "input.tif"
         input_filepath = input_dir / input_filename
 
         with open(input_filepath, "wb") as f:
-            f.write(image_bytes)
-        
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
         print(f"Input file saved to: {input_filepath}")
 
-        # Run the inference
+        # Run the inference (this part remains the same)
         output_filepath = run_terratorch_inference(
             input_dir=str(input_dir),
             output_dir=str(output_dir),
@@ -116,38 +120,32 @@ def detect_flood(base64_tiff_string: str) -> str:
         if not output_filepath:
             raise gr.Error("Inference failed to produce an output file.")
 
-        # Gradio's gr.Image will handle this filepath and display the image.
-        # The temporary file will be automatically served by Gradio.
         return output_filepath
 
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to download image from URL: {e}")
+        raise gr.Error(f"Could not fetch image from URL: {image_url}")
     except Exception as e:
-        # Ensure cleanup happens on any error
         print(f"An error occurred: {e}")
         raise gr.Error(str(e))
-    # Note: Gradio manages the cleanup of temporary files returned by functions.
-    # If you didn't return the path, you would use a finally block:
-    # finally:
-    #     shutil.rmtree(temp_dir)
 
 
 # Create the Gradio interface
 demo = gr.Interface(
     fn=detect_flood,
     inputs=gr.Textbox(
-        lines=5, 
-        placeholder="Paste your base64 encoded TIFF image string here...",
-        label="Base64 Input TIFF"
+        lines=1,
+        placeholder="https://path/to/your/satellite_image.tif",
+        label="Image URL"
     ),
     outputs=gr.Image(
-        type="filepath", 
+        type="filepath",
         label="Flood Detection Result"
     ),
     title="💧 Flood Detection Model 🌊",
-    description="Provide a base64 encoded GeoTIFF image to run flood detection. The model will output an image mask showing predicted flood areas."
+    description="Provide a public URL to a GeoTIFF image to run flood detection."
 )
 
 # Launch the interface
 if __name__ == "__main__":
-    # The `launch()` function starts the web server.
-    # Set server_name to "0.0.0.0" to make it accessible outside the container.
     demo.launch(server_name="0.0.0.0", server_port=8080, mcp_server=True)
