@@ -8,11 +8,45 @@ import subprocess
 from pathlib import Path
 import torch
 import sys
+import boto3
 
 # Define fixed paths from your container setup
 CONFIG_PATH = '/app/configs/config_granite_geospatial_uki_flood_detection_v1.yaml'
 CHECKPOINT_PATH = '/app/models/granite_geospatial_uki_flood_detection_v1.ckpt'
 PROJECT_CODE_DIR = "/app"
+
+# --- MinIO Configuration ---
+MINIO_ENDPOINT = 'https://minio-s3-ppe-multi-modal.apps.cluster-r8fxn.r8fxn.sandbox753.opentlc.com'
+MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY')
+MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY')
+MINIO_BUCKET = 'flood-predictions'
+
+
+def upload_to_minio(file_path: str, object_name: str) -> str:
+    """
+    Upload a file to MinIO storage.
+    """
+    if not MINIO_ACCESS_KEY or not MINIO_SECRET_KEY:
+        raise gr.Error(
+            "MinIO credentials are not configured. Cannot upload result.")
+
+    try:
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=MINIO_ENDPOINT,
+            aws_access_key_id=MINIO_ACCESS_KEY,
+            aws_secret_access_key=MINIO_SECRET_KEY,
+            region_name='us-east-1'
+        )
+        print(
+            f"Uploading {file_path} to MinIO bucket '{MINIO_BUCKET}' as '{object_name}'")
+        s3_client.upload_file(file_path, MINIO_BUCKET, object_name)
+        url = f"{MINIO_ENDPOINT}/{MINIO_BUCKET}/{object_name}"
+        print(f"File uploaded. URL: {url}")
+        return url
+    except Exception as e:
+        print(f"Error uploading to MinIO: {e}", file=sys.stderr)
+        raise gr.Error(f"Failed to upload result to MinIO: {e}")
 
 
 def run_terratorch_inference(input_dir: str, output_dir: str, input_filename: str) -> str:
@@ -120,7 +154,9 @@ def detect_flood(image_url: str) -> str:
         if not output_filepath:
             raise gr.Error("Inference failed to produce an output file.")
 
-        return output_filepath
+        minio_url = upload_to_minio(
+            output_filepath, Path(output_filepath).name)
+        return minio_url
 
     except requests.exceptions.RequestException as e:
         print(f"Failed to download image from URL: {e}")
@@ -138,10 +174,7 @@ demo = gr.Interface(
         placeholder="https://path/to/your/satellite_image.tif",
         label="Image URL"
     ),
-    outputs=gr.Image(
-        type="filepath",
-        label="Flood Detection Result"
-    ),
+    outputs=gr.Textbox(label="MinIO Result URL"),
     title="💧 Flood Detection Model 🌊",
     description="Provide a public URL to a GeoTIFF image to run flood detection."
 )
