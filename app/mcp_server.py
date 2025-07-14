@@ -47,6 +47,48 @@ def upload_to_minio(file_path: str, object_name: str) -> str:
     except Exception as e:
         print(f"Error uploading to MinIO: {e}", file=sys.stderr)
         raise gr.Error(f"Failed to upload result to MinIO: {e}")
+    
+
+def ensure_files_exist():
+    """
+    On startup, check if the config and model files exist locally.
+    If not, download them from the 'flood-models' MinIO bucket.
+    """
+    files_to_check = {
+        CONFIG_PATH: "config_granite_geospatial_uki_flood_detection_v1.yaml",
+        CHECKPOINT_PATH: "granite_geospatial_uki_flood_detection_v1.ckpt",
+    }
+
+    # Don't try to download if credentials aren't set
+    if not MINIO_ACCESS_KEY or not MINIO_SECRET_KEY:
+        print("WARNING: MinIO credentials not found. Cannot check or download model files.")
+        return
+
+    s3_client = boto3.client(
+        "s3",
+        endpoint_url=MINIO_ENDPOINT,
+        aws_access_key_id=MINIO_ACCESS_KEY,
+        aws_secret_access_key=MINIO_SECRET_KEY,
+        region_name="us-east-1",
+        verify=False  # As determined in previous steps
+    )
+
+    for local_path, minio_filename in files_to_check.items():
+        if Path(local_path).exists():
+            print(f"✅ File already exists locally: {local_path}")
+        else:
+            print(f"⬇️ File not found. Downloading '{minio_filename}' from MinIO...")
+            # Ensure local directory exists
+            Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+            try:
+                s3_client.download_file(
+                    "flood-models", minio_filename, local_path
+                )
+                print(f"✅ Successfully downloaded {local_path}")
+            except Exception as e:
+                print(f"❌ ERROR: Failed to download {minio_filename}: {e}", file=sys.stderr)
+                # This is a critical failure, so we exit.
+                sys.exit(1)
 
 
 def run_terratorch_inference(input_dir: str, output_dir: str, input_filename: str) -> str:
@@ -181,4 +223,5 @@ demo = gr.Interface(
 
 # Launch the interface
 if __name__ == "__main__":
+    ensure_files_exist()
     demo.launch(server_name="0.0.0.0", server_port=8080, mcp_server=True)
