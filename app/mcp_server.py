@@ -1,132 +1,153 @@
-# # ---------------------------------------------------------------------
-# # TEMPORARY MONKEY‑PATCH to avoid “before initialization” crashes
-# # (remove as soon as you’re on mcp 1.7.0+)
-# # ---------------------------------------------------------------------
-
-# from mcp.server.session import ServerSession
-
-# # keep a reference to the original
-# _original_received_request = ServerSession._received_request
-
-
-# async def _patched_received_request(self, *args, **kwargs):
-#     try:
-#         return await _original_received_request(self, *args, **kwargs)
-#     except RuntimeError as e:
-#         # swallow only the “before initialization was complete” error
-#         if "before initialization was complete" in str(e):
-#             return
-#         # re‑raise anything else
-#         raise
-
-# # install the patch
-# ServerSession._received_request = _patched_received_request
-# # ---------------------------------------------------------------------
-
-import inference  # assuming this is in the same /app folder
-from uvicorn import run as uvicorn_run
-from mcp.server.fastmcp import FastMCP
-import asyncio
-import base64
+import gradio as gr
 import os
-import boto3
+import base64
+import tempfile
+# import shutil
+import subprocess
 from pathlib import Path
+import torch
 
-# Initialize the MCP server
-mcp = FastMCP("flood-detection")
+# Define fixed paths from your container setup
+CONFIG_PATH = '/app/configs/config_granite_geospatial_uki_flood_detection_v1.yaml'
+CHECKPOINT_PATH = '/app/models/granite_geospatial_uki_flood_detection_v1.ckpt'
+PROJECT_CODE_DIR = "/app"
 
-
-@mcp.tool()
-async def generate_flood_map(input_file_url: str, filename: str = "input.tif") -> str:
+def run_terratorch_inference(input_dir: str, output_dir: str, input_filename: str) -> str:
     """
-    Generates a flood map from an input TIFF image located at a URL.
-    The server will download the file from the provided URL.
-    GPU usage is detected automatically within the container.
+    Runs terratorch inference on a TIFF file. (Copied from your main.py)
+    """
+    predict_script = "terratorch"
+    accelerator = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"✅ Using accelerator='{accelerator}'.")
+
+    command = [
+        predict_script, "predict",
+        "-c", CONFIG_PATH,
+        "--ckpt_path", CHECKPOINT_PATH,
+        "--predict_output_dir", output_dir,
+        "--data.init_args.predict_data_root", input_dir,
+        "--data.init_args.img_grep", input_filename,
+        f"--trainer.accelerator={accelerator}",
+        "--trainer.devices=1",
+        "--data.init_args.batch_size=1",
+        "--trainer.default_root_dir=/app/data"
+    ]
+
+    print(f"\nExecuting command: {' '.join(command)}")
+    try:
+        # Using subprocess.run for simplicity as we wait for it to complete
+        result = subprocess.run(
+            command,
+            cwd=PROJECT_CODE_DIR,
+            capture_output=True,
+            text=True,
+            check=True,  # This will raise an exception on non-zero exit codes
+            env=os.environ.copy()
+        )
+        print("STDOUT:", result.stdout)
+        print("STDERR:", result.stderr)
+        print("\nTerratorch predict command finished successfully.")
+
+        base_name = Path(input_filename).stem
+        expected_output_filename = f"{base_name}_pred.tif"
+        output_filepath = Path(output_dir) / expected_output_filename
+
+        if not output_filepath.exists():
+            raise FileNotFoundError(f"Inference finished, but output file '{output_filepath}' was not found.")
+            
+        return str(output_filepath)
+
+    except subprocess.CalledProcessError as e:
+        print(f"Terratorch predict command failed with exit code {e.returncode}.", file=sys.stderr)
+        print("STDOUT:", e.stdout)
+        print("STDERR:", e.stderr)
+        raise gr.Error(f"Model inference failed. Check logs for details. STDERR: {e.stderr}")
+    except Exception as e:
+        print(f"An error occurred during inference: {e}", file=sys.stderr)
+        raise gr.Error(f"An unexpected error occurred: {e}")
+
+
+def detect_flood(base64_tiff_string: str) -> str:
+    """
+    Performs flood detection on a base64 encoded GeoTIFF image.
 
     Args:
-        input_file_url: The publicly accessible URL of the input TIFF file.
-        filename: The original filename of the input TIFF (optional, used for context/logging).
+        base64_tiff_string (str): A base64 encoded string of a GeoTIFF image. It can be prefixed with a data URI like 'data:image/tiff;base64,'.
 
     Returns:
-        A base64 encoded string of the resulting flood map TIFF image,
-        or an error message string starting with 'Error:'.
+        str: The file path to the resulting prediction image, which shows flood areas.
     """
-    print(
-        f"Received request to generate flood map for file at URL: {input_file_url} (Original name: {filename})")
-    try:
-        # Run the inference using the URL
-        # Using asyncio.to_thread for potentially blocking download and subprocess call
-        output_bytes = await asyncio.to_thread(
-            inference.run_terratorch_inference,  # Pass the function itself
-            input_file_url,                     # Pass arguments separately
-            filename
-        )
-        # If your inference function is already async (e.g., uses aiohttp), you can await it:
-        # output_bytes = await inference.run_terratorch_inference(input_file_url, filename)
+    if not base64_tiff_string:
+        raise gr.Error("Input is empty. Please provide a base64 encoded TIFF string.")
 
-        if output_bytes:
-            print(
-                f"Inference successful, received {len(output_bytes)} output bytes.")
-            # Encode the output bytes to base64
-            output_base64 = base64.b64encode(output_bytes).decode('utf-8')
-            print("Encoded output to base64.")
-            return output_base64
+    # Create a temporary directory for processing this request
+    temp_dir = tempfile.mkdtemp(prefix="flood_detect_")
+    
+    try:
+        temp_dir_path = Path(temp_dir)
+        input_dir = temp_dir_path / "input"
+        output_dir = temp_dir_path / "output"
+        input_dir.mkdir()
+        output_dir.mkdir()
+
+        # Decode the base64 string and save as a .tif file
+        # This handles strings with or without the 'data:image/tiff;base64,' prefix
+        if "," in base64_tiff_string:
+            _, encoded = base64_tiff_string.split(",", 1)
         else:
-            print("Inference failed or produced no output.")
-            return "Error: Inference failed to produce an output file."
+            encoded = base64_tiff_string
+
+        image_bytes = base64.b64decode(encoded)
+        input_filename = "input.tif"
+        input_filepath = input_dir / input_filename
+
+        with open(input_filepath, "wb") as f:
+            f.write(image_bytes)
+        
+        print(f"Input file saved to: {input_filepath}")
+
+        # Run the inference
+        output_filepath = run_terratorch_inference(
+            input_dir=str(input_dir),
+            output_dir=str(output_dir),
+            input_filename=input_filename
+        )
+
+        if not output_filepath:
+            raise gr.Error("Inference failed to produce an output file.")
+
+        # Gradio's gr.Image will handle this filepath and display the image.
+        # The temporary file will be automatically served by Gradio.
+        return output_filepath
 
     except Exception as e:
-        print(f"An unexpected error occurred in the tool: {e}")
-        return f"Error: Internal server error - {e}"
+        # Ensure cleanup happens on any error
+        print(f"An error occurred: {e}")
+        raise gr.Error(str(e))
+    # Note: Gradio manages the cleanup of temporary files returned by functions.
+    # If you didn't return the path, you would use a finally block:
+    # finally:
+    #     shutil.rmtree(temp_dir)
 
 
-def ensure_models_exist():
-    """Download models from MinIO if they don't exist locally"""
-    model_path = Path(
-        "/app/models/granite_geospatial_uki_flood_detection_v1.ckpt")
-    # config_path = Path(
-    #     "/app/configs/config_granite_geospatial_uki_flood_detection_v1.yaml")
+# Create the Gradio interface
+demo = gr.Interface(
+    fn=detect_flood,
+    inputs=gr.Textbox(
+        lines=5, 
+        placeholder="Paste your base64 encoded TIFF image string here...",
+        label="Base64 Input TIFF"
+    ),
+    outputs=gr.Image(
+        type="filepath", 
+        label="Flood Detection Result"
+    ),
+    title="💧 Flood Detection Model 🌊",
+    description="Provide a base64 encoded GeoTIFF image to run flood detection. The model will output an image mask showing predicted flood areas."
+)
 
-    # If models already exist, skip download
-    if model_path.exists():  # and config_path.exists():
-        print("Models and configs already exist locally")
-        return
-
-    print("Downloading models and configs from MinIO...")
-
-    # MinIO configuration (from your document)
-    s3_client = boto3.client(
-        's3',
-        endpoint_url='https://minio-s3-ppe-multi-modal.apps.cluster-r8fxn.r8fxn.sandbox753.opentlc.com',
-        aws_access_key_id=os.environ.get('MINIO_ACCESS_KEY'),
-        aws_secret_access_key=os.environ.get('MINIO_SECRET_KEY'),
-        region_name='us-east-1'
-    )
-
-    # Create directories if they don't exist
-    os.makedirs("/app/models", exist_ok=True)
-    # os.makedirs("/app/configs", exist_ok=True)
-
-    # Download model and config from MinIO
-    try:
-        bucket_name = 'flood-models'  # Change to your actual bucket name
-        s3_client.download_file(
-            bucket_name, 'granite_geospatial_uki_flood_detection_v1.ckpt', str(model_path))
-        # s3_client.download_file(
-        #     bucket_name, 'config_granite_geospatial_uki_flood_detection_v1.yaml', str(config_path))
-        print("Successfully downloaded models and configs")
-    except Exception as e:
-        print(f"Error downloading models: {e}")
-        raise
-
-
+# Launch the interface
 if __name__ == "__main__":
-    print("🚀 Starting Flood Detection MCP Server...")
-    ensure_models_exist()
-    # Create an ASGI app with explicitly defined paths
-    # Make the root path work for SSE connection
-    # app = mcp.sse_app()
-    app = mcp.run()
-
-    # Run it with uvicorn
-    # uvicorn_run(app, host="0.0.0.0", port=8080)
+    # The `launch()` function starts the web server.
+    # Set server_name to "0.0.0.0" to make it accessible outside the container.
+    demo.launch(server_name="0.0.0.0", server_port=8080, mcp_server=True)

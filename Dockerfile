@@ -11,8 +11,8 @@ ENV PYTHONPATH="/app"
 # Install Python dependencies in smaller groups with cache cleaning
 # Core dependencies first
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip3 install --no-cache-dir boto3 requests mcp && \
-    pip3 install --no-cache-dir numpy "fastapi<0.100.0" uvicorn[standard] python-multipart 
+    pip3 install --no-cache-dir boto3 requests mcp "gradio[mcp]" numpy && \
+    pip3 install --no-cache-dir numpy python-multipart 
 
 # ML dependencies
 RUN pip3 install --no-cache-dir torch==2.1.0 torchvision==0.16.0 --index-url https://download.pytorch.org/whl/cpu
@@ -36,4 +36,4 @@ COPY ./app /app
 EXPOSE 8080
 
 # Start MCP server with uvicorn
-CMD ["python3", "main.py"]
+CMD ["python3", "mcp_server.py"]
