@@ -64,39 +64,97 @@ def upload_to_minio(file_path: str, object_name: str) -> str:
 
 
 def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
-    """Fetches a Sentinel-2 TIFF image as bytes."""
+    """
+    Fetches a 9-band TIFF image combining Sentinel-2 L2A, a cloud mask,
+    and Sentinel-1 GRD data, as expected by the flood detection model.
+    """
     if not SH_CLIENT_ID or not SH_CLIENT_SECRET:
         raise gr.Error(
             "Sentinel Hub credentials (SH_CLIENT_ID, SH_CLIENT_SECRET) are not set.")
-    config = SHConfig(sh_client_id=SH_CLIENT_ID,
-                      sh_client_secret=SH_CLIENT_SECRET)
+
+    config = SHConfig(
+        sh_client_id=SH_CLIENT_ID,
+        sh_client_secret=SH_CLIENT_SECRET,
+        sh_config_dir='/tmp'
+    )
+
+    # This evalscript requests bands from both S1 and S2 and creates the cloud mask
     evalscript = """
         //VERSION=3
         function setup() {
             return {
-                input: ["B02", "B03", "B04"],
-                output: { bands: 3 }
+                input: [
+                    {
+                        datasource: "S2L2A",
+                        bands: ["B02", "B03", "B04", "B08", "B11", "B12", "SCL"],
+                        units: "DN"
+                    },
+                    {
+                        datasource: "S1GRD",
+                        bands: ["VV", "VH"],
+                        units: "LINEAR"
+                    }
+                ],
+                output: {
+                    bands: 9,
+                    sampleType: "FLOAT32"
+                },
+                mosaicking: "ORBIT"
             };
         }
-        function evaluatePixel(sample) {
-            return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02];
+
+        function evaluatePixel(samples) {
+            // Get Sentinel-2 bands
+            let s2 = samples.S2L2A[0];
+
+            // Get Sentinel-1 bands
+            let s1 = samples.S1GRD[0];
+
+            // Create the cloud mask from the Scene Classification Layer (SCL)
+            // SCL values 8, 9, 10 correspond to medium/high probability clouds and cirrus
+            let cloudMask = (s2.SCL == 8 || s2.SCL == 9 || s2.SCL == 10) ? 1.0 : 0.0;
+
+            // Return the 9 bands in the correct order
+            return [
+                s2.B02,
+                s2.B03,
+                s2.B04,
+                s2.B08,
+                s2.B11,
+                s2.B12,
+                s1.VV,
+                s1.VH,
+                cloudMask
+            ];
         }
     """
+
     request = SentinelHubRequest(
         evalscript=evalscript,
         input_data=[
+            # Define the two data sources for the evalscript
             SentinelHubRequest.input_data(
-                data_collection=DataCollection.SENTINEL2_L1C,
+                data_collection=DataCollection.SENTINEL2_L2A,
+                time_interval=time_interval,
+                mosaicking_order='leastCC'
+            ),
+            SentinelHubRequest.input_data(
+                data_collection=DataCollection.SENTINEL1_GRD,
                 time_interval=time_interval,
             )
         ],
         responses=[SentinelHubRequest.output_response(
             "default", MimeType.TIFF)],
         bbox=BBox(bbox=bbox, crs=CRS.WGS84),
-        size=[512, 512],
+        size=[512, 512],  # The model was trained on 512x512 images
         config=config,
     )
-    return request.get_data()[0]
+
+    # The request will return a list of results, we take the first one
+    results = request.get_data()
+    if not results:
+        return b''  # Return empty bytes if no data was found
+    return results[0]
 
 
 def ensure_files_exist():
