@@ -75,7 +75,6 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
     config = SHConfig(
         sh_client_id=SH_CLIENT_ID,
         sh_client_secret=SH_CLIENT_SECRET,
-        sh_config_dir='/tmp'
     )
 
     # This evalscript requests bands from both S1 and S2 and creates the cloud mask
