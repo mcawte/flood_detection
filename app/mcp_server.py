@@ -406,15 +406,15 @@ inferface_coordinates_datetime = gr.Interface(
             label="Bounding Box (min_lon, min_lat, max_lon, max_lat)",
             placeholder="e.g., 28.94, 41.01, 28.99, 41.04"
         ),
-        gr.DateTime(label="Analysis Date", value=datetime.date.today())
+        gr.DateTime(label="Analysis Date", value=datetime.date.today().now())
     ],
     outputs=gr.Textbox(label="🔗 MinIO URL for Flood Prediction Map"),
     title="🛰️ Automated Flood Detection from Satellite Imagery 🌊",
     description="Provide a bounding box and date. The service will fetch the corresponding Sentinel-2 satellite image, run it through the flood detection model, and return a link to the prediction map.",
     examples=[
         # Example over Leeds, UK
-        ["-1.57, 53.80, -1.50, 53.83", datetime.date(2025, 1, 10)],
-        ["28.85, 40.97, 28.90, 41.00", datetime.date(2025, 7, 17)]
+        ["-1.57, 53.80, -1.50, 53.83", datetime.datetime(2025, 1, 10)],
+        ["28.85, 40.97, 28.90, 41.00", datetime.datetime(2025, 7, 17, 15, 30)]
     ],
     allow_flagging="never"
 )
