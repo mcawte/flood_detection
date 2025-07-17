@@ -138,7 +138,7 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
                 mosaicking_order='leastCC'
             ),
             SentinelHubRequest.input_data(
-                data_collection=DataCollection.SENTINEL1_GRD,
+                data_collection=DataCollection.SENTINEL1,
                 time_interval=time_interval,
             )
         ],
