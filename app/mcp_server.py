@@ -9,6 +9,9 @@ from pathlib import Path
 import torch
 import sys
 import boto3
+import datetime
+from sentinelhub import SHConfig, BBox, CRS, DataCollection, SentinelHubRequest, MimeType
+
 
 # Define fixed paths from your container setup
 CONFIG_PATH = '/app/configs/config_granite_geospatial_uki_flood_detection_v1.yaml'
@@ -20,6 +23,11 @@ MINIO_ENDPOINT = 'https://minio-s3-ppe-multi-modal.apps.cluster-r8fxn.r8fxn.sand
 MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY')
 MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY')
 MINIO_BUCKET = 'flood-predictions'
+
+# --- Sentinel Hub Configuration ---
+# Secrets must be set as environment variables
+SH_CLIENT_ID = os.environ.get("SH_CLIENT_ID")
+SH_CLIENT_SECRET = os.environ.get("SH_CLIENT_SECRET")
 
 
 def upload_to_minio(file_path: str, object_name: str) -> str:
@@ -53,7 +61,43 @@ def upload_to_minio(file_path: str, object_name: str) -> str:
     except Exception as e:
         print(f"Error uploading to MinIO: {e}", file=sys.stderr)
         raise gr.Error(f"Failed to upload result to MinIO: {e}")
-    
+
+
+def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
+    """Fetches a Sentinel-2 TIFF image as bytes."""
+    if not SH_CLIENT_ID or not SH_CLIENT_SECRET:
+        raise gr.Error(
+            "Sentinel Hub credentials (SH_CLIENT_ID, SH_CLIENT_SECRET) are not set.")
+    config = SHConfig(sh_client_id=SH_CLIENT_ID,
+                      sh_client_secret=SH_CLIENT_SECRET)
+    evalscript = """
+        //VERSION=3
+        function setup() {
+            return {
+                input: ["B02", "B03", "B04"],
+                output: { bands: 3 }
+            };
+        }
+        function evaluatePixel(sample) {
+            return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02];
+        }
+    """
+    request = SentinelHubRequest(
+        evalscript=evalscript,
+        input_data=[
+            SentinelHubRequest.input_data(
+                data_collection=DataCollection.SENTINEL2_L1C,
+                time_interval=time_interval,
+            )
+        ],
+        responses=[SentinelHubRequest.output_response(
+            "default", MimeType.TIFF)],
+        bbox=BBox(bbox=bbox, crs=CRS.WGS84),
+        size=[512, 512],
+        config=config,
+    )
+    return request.get_data()[0]
+
 
 def ensure_files_exist():
     """
@@ -83,7 +127,8 @@ def ensure_files_exist():
         if Path(local_path).exists():
             print(f"✅ File already exists locally: {local_path}")
         else:
-            print(f"⬇️ File not found. Downloading '{minio_filename}' from MinIO...")
+            print(
+                f"⬇️ File not found. Downloading '{minio_filename}' from MinIO...")
             # Ensure local directory exists
             Path(local_path).parent.mkdir(parents=True, exist_ok=True)
             try:
@@ -92,7 +137,8 @@ def ensure_files_exist():
                 )
                 print(f"✅ Successfully downloaded {local_path}")
             except Exception as e:
-                print(f"❌ ERROR: Failed to download {minio_filename}: {e}", file=sys.stderr)
+                print(
+                    f"❌ ERROR: Failed to download {minio_filename}: {e}", file=sys.stderr)
                 # This is a critical failure, so we exit.
                 sys.exit(1)
 
@@ -203,7 +249,7 @@ def detect_flood_from_url(image_url: str) -> str:
 
         if not output_filepath:
             raise gr.Error("Inference failed to produce an output file.")
-        
+
         # Upload to MinIO and get the URL
         minio_url = upload_to_minio(
             output_filepath, Path(output_filepath).name)
@@ -229,10 +275,10 @@ def detect_flood_from_file(temp_file) -> str:
     """
     if temp_file is None:
         raise gr.Error("No file uploaded. Please upload a TIFF image.")
-    
+
     input_filepath = Path(temp_file.name)
     print(f"Processing uploaded file: {input_filepath}")
-    
+
     # Create a temporary directory for the output
     temp_dir = tempfile.mkdtemp(prefix="flood_detect_file_")
 
@@ -243,10 +289,10 @@ def detect_flood_from_file(temp_file) -> str:
         # The output will be in our new temporary directory
         output_dir = str(temp_dir_path / "output")
         Path(output_dir).mkdir()
-        
+
         # The filename is the name of the uploaded file
         input_filename = input_filepath.name
-        
+
         # Run the inference
         output_filepath = run_terratorch_inference(
             input_dir=input_dir,
@@ -264,6 +310,65 @@ def detect_flood_from_file(temp_file) -> str:
 
     except Exception as e:
         print(f"An error occurred: {e}")
+        raise gr.Error(str(e))
+
+
+def fetch_and_run_flood_detection(bbox_str: str, analysis_date: datetime.date) -> str:
+    """
+    Orchestrates the entire process: fetch from Sentinel Hub, run inference,
+    and upload the result.
+    """
+    if not bbox_str or not analysis_date:
+        raise gr.Error("Bounding Box and Analysis Date must be provided.")
+
+    try:
+        # 1. Parse Inputs from Gradio UI
+        bbox_parts = [float(p.strip()) for p in bbox_str.split(',')]
+        if len(bbox_parts) != 4:
+            raise ValueError(
+                "Bounding Box must have 4 comma-separated values: min_lon, min_lat, max_lon, max_lat")
+        bbox = tuple(bbox_parts)
+        time_interval = (analysis_date.isoformat() + 'T00:00:00Z',
+                         analysis_date.isoformat() + 'T23:59:59Z')
+
+        # 2. Fetch the satellite image from Sentinel Hub
+        print(
+            f"Fetching Sentinel Hub image for BBox: {bbox} on {analysis_date.isoformat()}")
+        tiff_data_bytes = fetch_sentinel_image(bbox, time_interval)
+        if not tiff_data_bytes:
+            raise gr.Error(
+                "Failed to fetch data from Sentinel Hub. The area might be cloudy or no data is available.")
+
+        # 3. Save the fetched TIFF to a temporary directory
+        # Terratorch needs a file path to read from.
+        temp_dir = tempfile.mkdtemp(prefix="sentinel_flood_")
+        temp_dir_path = Path(temp_dir)
+        input_dir = temp_dir_path / "input"
+        output_dir = temp_dir_path / "output"
+        input_dir.mkdir()
+        output_dir.mkdir()
+
+        input_filename = f"sentinel_image_{analysis_date.isoformat()}.tif"
+        input_filepath = input_dir / input_filename
+        with open(input_filepath, "wb") as f:
+            f.write(tiff_data_bytes)
+        print(f"Sentinel TIFF saved to temporary file: {input_filepath}")
+
+        # 4. Run Terratorch inference on the saved file
+        output_filepath = run_terratorch_inference(
+            input_dir=str(input_dir),
+            output_dir=str(output_dir),
+            input_filename=input_filename
+        )
+
+        # 5. Upload the prediction result to MinIO
+        minio_url = upload_to_minio(
+            output_filepath, Path(output_filepath).name)
+
+        return minio_url
+
+    except Exception as e:
+        print(f"An error occurred during the process: {e}", file=sys.stderr)
         raise gr.Error(str(e))
 
 # --- Create the Gradio Interface ---
@@ -294,10 +399,30 @@ interface_file = gr.Interface(
     description="Upload a GeoTIFF image directly to run flood detection."
 )
 
+inferface_coordinates_datetime = gr.Interface(
+    fn=fetch_and_run_flood_detection,
+    inputs=[
+        gr.Textbox(
+            label="Bounding Box (min_lon, min_lat, max_lon, max_lat)",
+            placeholder="e.g., 28.94, 41.01, 28.99, 41.04"
+        ),
+        gr.Date(label="Analysis Date", value=datetime.date.today())
+    ],
+    outputs=gr.Textbox(label="🔗 MinIO URL for Flood Prediction Map"),
+    title="🛰️ Automated Flood Detection from Satellite Imagery 🌊",
+    description="Provide a bounding box and date. The service will fetch the corresponding Sentinel-2 satellite image, run it through the flood detection model, and return a link to the prediction map.",
+    examples=[
+        # Example over Leeds, UK
+        ["-1.57, 53.80, -1.50, 53.83", datetime.date(2025, 1, 10)],
+        ["28.85, 40.97, 28.90, 41.00", datetime.date(2025, 7, 17)]
+    ],
+    allow_flagging="never"
+)
+
 # Combine them into a single app with tabs
 demo = gr.TabbedInterface(
-    [interface_url, interface_file],
-    ["From URL", "From File Upload"]
+    [interface_url, interface_file, inferface_coordinates_datetime],
+    ["From URL", "From File Upload", "From Coordinates and Date"]
 )
 
 # Launch the interface

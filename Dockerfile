@@ -11,7 +11,7 @@ ENV PYTHONPATH="/app"
 # Install Python dependencies in smaller groups with cache cleaning
 # Core dependencies first
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip3 install --no-cache-dir boto3 requests mcp "gradio[mcp]" numpy && \
+    pip3 install --no-cache-dir boto3 requests mcp "gradio[mcp]" numpy sentinelhub datetime && \
     pip3 install --no-cache-dir numpy python-multipart 
 
 # ML dependencies
