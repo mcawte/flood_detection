@@ -313,16 +313,19 @@ def detect_flood_from_file(temp_file) -> str:
         raise gr.Error(str(e))
 
 
-def fetch_and_run_flood_detection(bbox_str: str, analysis_date: datetime.date) -> str:
+def fetch_and_run_flood_detection(bbox_str: str, analysis_date_timestamp: float) -> str:
     """
     Orchestrates the entire process: fetch from Sentinel Hub, run inference,
     and upload the result.
     """
-    if not bbox_str or not analysis_date:
+    if not bbox_str or not analysis_date_timestamp:
         raise gr.Error("Bounding Box and Analysis Date must be provided.")
 
     try:
         # 1. Parse Inputs from Gradio UI
+        analysis_date = datetime.datetime.fromtimestamp(
+            analysis_date_timestamp).date()
+
         bbox_parts = [float(p.strip()) for p in bbox_str.split(',')]
         if len(bbox_parts) != 4:
             raise ValueError(
@@ -406,11 +409,11 @@ inferface_coordinates_datetime = gr.Interface(
             label="Bounding Box (min_lon, min_lat, max_lon, max_lat)",
             placeholder="e.g., 28.94, 41.01, 28.99, 41.04"
         ),
-        gr.DateTime(label="Analysis Date", value=datetime.datetime.now())
+        gr.DateTime(label="Analysis DateTime", value=datetime.datetime.now())
     ],
     outputs=gr.Textbox(label="🔗 MinIO URL for Flood Prediction Map"),
     title="🛰️ Automated Flood Detection from Satellite Imagery 🌊",
-    description="Provide a bounding box and date. The service will fetch the corresponding Sentinel-2 satellite image, run it through the flood detection model, and return a link to the prediction map.",
+    description="Provide a bounding box and datetime. The service will fetch the corresponding Sentinel-2 satellite image, run it through the flood detection model, and return a link to the prediction map.",
     examples=[
         # Example over Leeds, UK
         ["-1.57, 53.80, -1.50, 53.83", datetime.datetime(2025, 1, 10)],
