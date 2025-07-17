@@ -406,7 +406,7 @@ inferface_coordinates_datetime = gr.Interface(
             label="Bounding Box (min_lon, min_lat, max_lon, max_lat)",
             placeholder="e.g., 28.94, 41.01, 28.99, 41.04"
         ),
-        gr.DateTime(label="Analysis Date", value=datetime.date.now())
+        gr.DateTime(label="Analysis Date", value=datetime.datetime.now())
     ],
     outputs=gr.Textbox(label="🔗 MinIO URL for Flood Prediction Map"),
     title="🛰️ Automated Flood Detection from Satellite Imagery 🌊",
