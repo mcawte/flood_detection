@@ -155,7 +155,7 @@ def run_terratorch_inference(input_dir: str, output_dir: str, input_filename: st
         raise gr.Error(f"An unexpected error occurred: {e}")
 
 
-def detect_flood(image_url: str) -> str:
+def detect_flood_from_url(image_url: str) -> str:
     """
     Performs flood detection on a GeoTIFF image provided via a URL.
 
@@ -163,13 +163,13 @@ def detect_flood(image_url: str) -> str:
         image_url (str): A public URL pointing to a GeoTIFF image.
 
     Returns:
-        str: The file path to the resulting prediction image, which shows flood areas.
+        str: A presigned URL to the resulting prediction image in MinIO.
     """
     if not image_url:
         raise gr.Error("Input is empty. Please provide a URL to a TIFF image.")
 
     # Create a temporary directory for processing this request
-    temp_dir = tempfile.mkdtemp(prefix="flood_detect_")
+    temp_dir = tempfile.mkdtemp(prefix="flood_detect_url_")
 
     try:
         temp_dir_path = Path(temp_dir)
@@ -194,7 +194,7 @@ def detect_flood(image_url: str) -> str:
 
         print(f"Input file saved to: {input_filepath}")
 
-        # Run the inference (this part remains the same)
+        # Run the inference
         output_filepath = run_terratorch_inference(
             input_dir=str(input_dir),
             output_dir=str(output_dir),
@@ -203,7 +203,8 @@ def detect_flood(image_url: str) -> str:
 
         if not output_filepath:
             raise gr.Error("Inference failed to produce an output file.")
-
+        
+        # Upload to MinIO and get the URL
         minio_url = upload_to_minio(
             output_filepath, Path(output_filepath).name)
         return minio_url
@@ -216,17 +217,87 @@ def detect_flood(image_url: str) -> str:
         raise gr.Error(str(e))
 
 
-# Create the Gradio interface
-demo = gr.Interface(
-    fn=detect_flood,
+def detect_flood_from_file(temp_file) -> str:
+    """
+    Performs flood detection on a directly uploaded GeoTIFF file.
+
+    Args:
+        temp_file: The temporary file object from Gradio's File component.
+
+    Returns:
+        str: A presigned URL to the resulting prediction image in MinIO.
+    """
+    if temp_file is None:
+        raise gr.Error("No file uploaded. Please upload a TIFF image.")
+    
+    input_filepath = Path(temp_file.name)
+    print(f"Processing uploaded file: {input_filepath}")
+    
+    # Create a temporary directory for the output
+    temp_dir = tempfile.mkdtemp(prefix="flood_detect_file_")
+
+    try:
+        temp_dir_path = Path(temp_dir)
+        # The input directory is simply the directory of the uploaded file
+        input_dir = str(input_filepath.parent)
+        # The output will be in our new temporary directory
+        output_dir = str(temp_dir_path / "output")
+        Path(output_dir).mkdir()
+        
+        # The filename is the name of the uploaded file
+        input_filename = input_filepath.name
+        
+        # Run the inference
+        output_filepath = run_terratorch_inference(
+            input_dir=input_dir,
+            output_dir=output_dir,
+            input_filename=input_filename
+        )
+
+        if not output_filepath:
+            raise gr.Error("Inference failed to produce an output file.")
+
+        # Upload to MinIO and get the URL
+        minio_url = upload_to_minio(
+            output_filepath, Path(output_filepath).name)
+        return minio_url
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        raise gr.Error(str(e))
+
+# --- Create the Gradio Interface ---
+
+
+# Define the interface for URL input
+interface_url = gr.Interface(
+    fn=detect_flood_from_url,
     inputs=gr.Textbox(
         lines=1,
         placeholder="https://path/to/your/satellite_image.tif",
         label="Image URL"
     ),
     outputs=gr.Textbox(label="MinIO Result URL"),
-    title="💧 Flood Detection Model 🌊",
+    title="💧 Flood Detection from URL 🌊",
     description="Provide a public URL to a GeoTIFF image to run flood detection."
+)
+
+# Define the interface for file upload
+interface_file = gr.Interface(
+    fn=detect_flood_from_file,
+    inputs=gr.File(
+        label="Upload GeoTIFF Image",
+        file_types=[".tif", ".tiff"]
+    ),
+    outputs=gr.Textbox(label="MinIO Result URL"),
+    title="💧 Flood Detection from File Upload 🌊",
+    description="Upload a GeoTIFF image directly to run flood detection."
+)
+
+# Combine them into a single app with tabs
+demo = gr.TabbedInterface(
+    [interface_url, interface_file],
+    ["From URL", "From File Upload"]
 )
 
 # Launch the interface
