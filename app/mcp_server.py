@@ -338,7 +338,7 @@ def fetch_and_run_flood_detection(bbox_str: str, analysis_date_timestamp: float)
         print(
             f"Fetching Sentinel Hub image for BBox: {bbox} on {analysis_date.isoformat()}")
         tiff_data_bytes = fetch_sentinel_image(bbox, time_interval)
-        if not tiff_data_bytes:
+        if tiff_data_bytes.size == 0:
             raise gr.Error(
                 "Failed to fetch data from Sentinel Hub. The area might be cloudy or no data is available.")
 
