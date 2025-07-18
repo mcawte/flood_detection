@@ -11,8 +11,8 @@ ENV PYTHONPATH="/app"
 # Install Python dependencies in smaller groups with cache cleaning
 # Core dependencies first
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip3 install --no-cache-dir boto3 requests mcp "gradio[mcp]" numpy sentinelhub datetime io rasterio && \
-    pip3 install --no-cache-dir numpy python-multipart 
+    pip3 install --no-cache-dir boto3 requests mcp "gradio[mcp]" numpy sentinelhub rasterio && \
+    pip3 install --no-cache-dir python-multipart 
 
 # ML dependencies
 RUN pip3 install --no-cache-dir torch==2.1.0 torchvision==0.16.0 --index-url https://download.pytorch.org/whl/cpu
