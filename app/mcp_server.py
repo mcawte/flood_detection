@@ -149,7 +149,7 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
             ),
             # Use SENTINEL1_GRD for Sentinel-1 Ground Range Detected data
             SentinelHubRequest.input_data(
-                data_collection=DataCollection.SENTINEL1_GRD,
+                data_collection=DataCollection.SENTINEL1,
                 time_interval=time_interval,
             )
         ],
