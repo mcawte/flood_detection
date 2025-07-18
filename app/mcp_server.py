@@ -9,7 +9,6 @@ from pathlib import Path
 import torch
 import sys
 import boto3
-import datetime
 import numpy as np
 import rasterio
 from rasterio.transform import from_bounds
@@ -479,7 +478,7 @@ def fetch_and_run_flood_detection(bbox_str: str, analysis_date_timestamp: float)
 
     try:
         # 1. Parse Inputs from Gradio UI
-        analysis_date = datetime.datetime.fromtimestamp(
+        analysis_date = datetime.fromtimestamp(
             analysis_date_timestamp).date()
 
         bbox_parts = [float(p.strip()) for p in bbox_str.split(',')]
@@ -563,15 +562,15 @@ inferface_coordinates_datetime = gr.Interface(
             label="Bounding Box (min_lon, min_lat, max_lon, max_lat)",
             placeholder="e.g., 28.94, 41.01, 28.99, 41.04"
         ),
-        gr.DateTime(label="Analysis DateTime", value=datetime.datetime.now())
+        gr.DateTime(label="Analysis DateTime", value=datetime.now())
     ],
     outputs=gr.Textbox(label="🔗 MinIO URL for Flood Prediction Map"),
     title="🛰️ Automated Flood Detection from Satellite Imagery 🌊",
     description="Provide a bounding box and datetime. The service will fetch the corresponding Sentinel-2 satellite image, run it through the flood detection model, and return a link to the prediction map.",
     examples=[
         # Example over Leeds, UK
-        ["-1.57, 53.80, -1.50, 53.83", datetime.datetime(2025, 1, 10)],
-        ["28.85, 40.97, 28.90, 41.00", datetime.datetime(2025, 7, 17, 15, 30)]
+        ["-1.57, 53.80, -1.50, 53.83", datetime(2025, 1, 10)],
+        ["28.85, 40.97, 28.90, 41.00", datetime(2025, 7, 17, 15, 30)]
     ],
     allow_flagging="never"
 )
