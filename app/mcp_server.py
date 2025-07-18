@@ -157,8 +157,14 @@ def combine_sentinel_data(s2_data: np.ndarray, s1_data: np.ndarray, bbox: tuple)
     print(f"🔍 Transposed S2: {s2_data.shape}")
     print(f"🔍 Transposed S1: {s1_data.shape}")
 
-    # Combine arrays: S2 (7 bands) + S1 (2 bands) = 9 bands total
-    combined_array = np.concatenate([s2_data, s1_data], axis=0)
+    # 1. Isolate the actual spectral bands from the cloud mask
+    s2_spectral_bands = s2_data[:6, :, :]      # First 6 bands are spectral
+    cloud_mask_band = s2_data[6:, :, :]  # The 7th band is the cloud mask
+
+    # 2. Combine in the correct order: S2 (6), S1 (2), Cloud (1)
+    combined_array = np.concatenate(
+        [s2_spectral_bands, s1_data, cloud_mask_band], axis=0
+    )
     print(f"🔍 Combined array shape: {combined_array.shape}")
 
     # Create a TIFF profile
