@@ -10,6 +10,10 @@ import torch
 import sys
 import boto3
 import datetime
+import numpy as np
+import rasterio
+from rasterio.transform import from_bounds
+import io
 from sentinelhub import SHConfig, BBox, CRS, DataCollection, SentinelHubRequest, MimeType
 
 
@@ -63,46 +67,21 @@ def upload_to_minio(file_path: str, object_name: str) -> str:
         raise gr.Error(f"Failed to upload result to MinIO: {e}")
 
 
-def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
-    """
-    Fetches a 9-band TIFF image combining Sentinel-2 L2A, a cloud mask,
-    and Sentinel-1 GRD data, as expected by the flood detection model.
-    """
-    if not SH_CLIENT_ID or not SH_CLIENT_SECRET:
-        raise gr.Error(
-            "Sentinel Hub credentials (SH_CLIENT_ID, SH_CLIENT_SECRET) are not set.")
+def fetch_sentinel2_data(bbox: tuple, time_interval: tuple, config: SHConfig) -> np.ndarray:
+    """Fetch Sentinel-2 data separately"""
+    print("🛰️  Fetching Sentinel-2 data...")
 
-    config = SHConfig(
-        sh_client_id=SH_CLIENT_ID,
-        sh_client_secret=SH_CLIENT_SECRET,
-        sh_base_url="https://sh.dataspace.copernicus.eu"
-    )
-
-    # Updated evalscript with correct Copernicus Dataspace dataset identifiers
     evalscript = """
         //VERSION=3
         function setup() {
             return {
-                input: [
-                    { datasource: "S2L2A", bands: ["B02","B03","B04","B8A","B11","B12","SCL"], units: "REFLECTANCE" },
-                    { datasource: "S1GRD", bands: ["VV", "VH"], units: "LINEAR" }
-                ],
-                output: { bands: 9, sampleType: "FLOAT32" },
-                mosaicking: "ORBIT"
+                input: ["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
+                output: { bands: 7, sampleType: "FLOAT32" }
             };
         }
-        function toDb(linear) {
-            if (linear === 0) return -35.0;
-            let db = 10 * Math.log10(linear);
-            return Math.max(-35.0, Math.min(10.0, db));
-        }
-        function evaluatePixel(samples) {
-            let s2 = samples.S2L2A[0];
-            let s1 = samples.S1GRD[0];
-            let vv_db = toDb(s1.VV);
-            let vh_db = toDb(s1.VH);
-            let cloudMask = (s2.SCL == 8 || s2.SCL == 9 || s2.SCL == 10) ? 1.0 : 0.0;
-            return [ s2.B02, s2.B03, s2.B04, s2.B8A, s2.B11, s2.B12, vv_db, vh_db, cloudMask ];
+        function evaluatePixel(sample) {
+            let cloudMask = (sample.SCL == 8 || sample.SCL == 9 || sample.SCL == 10) ? 1.0 : 0.0;
+            return [sample.B02, sample.B03, sample.B04, sample.B8A, sample.B11, sample.B12, cloudMask];
         }
     """
 
@@ -113,9 +92,45 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
                 data_collection=DataCollection.SENTINEL2_L2A,
                 time_interval=time_interval,
                 mosaicking_order='leastCC'
-            ),
+            )
+        ],
+        responses=[SentinelHubRequest.output_response(
+            "default", MimeType.TIFF)],
+        bbox=BBox(bbox=bbox, crs=CRS.WGS84),
+        size=[512, 512],
+        config=config,
+    )
+
+    return request.get_data()[0]
+
+
+def fetch_sentinel1_data(bbox: tuple, time_interval: tuple, config: SHConfig) -> np.ndarray:
+    """Fetch Sentinel-1 data separately"""
+    print("🛰️  Fetching Sentinel-1 data...")
+
+    evalscript = """
+        //VERSION=3
+        function setup() {
+            return {
+                input: ["VV", "VH"],
+                output: { bands: 2, sampleType: "FLOAT32" }
+            };
+        }
+        function toDb(linear) {
+            if (linear === 0) return -35.0;
+            let db = 10 * Math.log10(linear);
+            return Math.max(-35.0, Math.min(10.0, db));
+        }
+        function evaluatePixel(sample) {
+            return [toDb(sample.VV), toDb(sample.VH)];
+        }
+    """
+
+    request = SentinelHubRequest(
+        evalscript=evalscript,
+        input_data=[
             SentinelHubRequest.input_data(
-                data_collection=DataCollection.SENTINEL1,
+                data_collection=DataCollection.SENTINEL1_IW,
                 time_interval=time_interval,
             )
         ],
@@ -126,10 +141,91 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
         config=config,
     )
 
-    results = request.get_data()
-    if not results:
-        return b''
-    return results[0]
+    return request.get_data()[0]
+
+
+def combine_sentinel_data(s2_data: np.ndarray, s1_data: np.ndarray, bbox: tuple) -> bytes:
+    """Combine Sentinel-1 and Sentinel-2 data into a single 9-band TIFF and return as bytes"""
+    print("🔧 Combining Sentinel-1 and Sentinel-2 data...")
+
+    # The data comes in (height, width, bands) format, need to transpose to (bands, height, width)
+    if s2_data.shape == (512, 512, 7):
+        s2_data = s2_data.transpose(2, 0, 1)  # (7, 512, 512)
+    if s1_data.shape == (512, 512, 2):
+        s1_data = s1_data.transpose(2, 0, 1)  # (2, 512, 512)
+
+    print(f"🔍 Transposed S2: {s2_data.shape}")
+    print(f"🔍 Transposed S1: {s1_data.shape}")
+
+    # Combine arrays: S2 (7 bands) + S1 (2 bands) = 9 bands total
+    combined_array = np.concatenate([s2_data, s1_data], axis=0)
+    print(f"🔍 Combined array shape: {combined_array.shape}")
+
+    # Create a TIFF profile
+    profile = {
+        'driver': 'GTiff',
+        'dtype': 'float32',
+        'width': 512,
+        'height': 512,
+        'count': 9,
+        'crs': 'EPSG:4326'
+    }
+
+    # Create transform from bbox
+    west, south, east, north = bbox
+    transform = from_bounds(west, south, east, north, 512, 512)
+    profile['transform'] = transform
+
+    # Write to memory buffer and return as bytes
+    with io.BytesIO() as buffer:
+        with rasterio.open(buffer, 'w', **profile) as dst:
+            dst.write(combined_array)
+        buffer.seek(0)
+        return buffer.read()
+
+
+def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
+    """
+    Fetches a 9-band TIFF image combining Sentinel-2 L2A, a cloud mask,
+    and Sentinel-1 GRD data, as expected by the flood detection model.
+
+    Updated to use separate requests approach that works with Copernicus Data Space Ecosystem.
+    """
+    if not SH_CLIENT_ID or not SH_CLIENT_SECRET:
+        raise gr.Error(
+            "Sentinel Hub credentials (SH_CLIENT_ID, SH_CLIENT_SECRET) are not set.")
+
+    # Create explicit Copernicus configuration
+    config = SHConfig()
+    config.sh_client_id = SH_CLIENT_ID
+    config.sh_client_secret = SH_CLIENT_SECRET
+    config.sh_base_url = "https://sh.dataspace.copernicus.eu"
+
+    print(f"✅ Using Copernicus Data Space Ecosystem: {config.sh_base_url}")
+
+    try:
+        # Fetch data separately using the working approach
+        s2_data = fetch_sentinel2_data(bbox, time_interval, config)
+        s1_data = fetch_sentinel1_data(bbox, time_interval, config)
+
+        if s2_data is None:
+            raise gr.Error("No Sentinel-2 data returned from Copernicus")
+
+        if s1_data is None:
+            raise gr.Error("No Sentinel-1 data returned from Copernicus")
+
+        print(f"✅ Got S2 data: {s2_data.size} elements")
+        print(f"✅ Got S1 data: {s1_data.size} elements")
+
+        # Combine and return as bytes
+        combined_tiff_bytes = combine_sentinel_data(s2_data, s1_data, bbox)
+        print(f"✅ Combined TIFF created: {len(combined_tiff_bytes)} bytes")
+
+        return combined_tiff_bytes
+
+    except Exception as e:
+        print(f"Error fetching sentinel data: {e}", file=sys.stderr)
+        raise gr.Error(f"Failed to fetch satellite data: {e}")
 
 
 def ensure_files_exist():
@@ -367,11 +463,11 @@ def fetch_and_run_flood_detection(bbox_str: str, analysis_date_timestamp: float)
         time_interval = (analysis_date.isoformat() + 'T00:00:00Z',
                          analysis_date.isoformat() + 'T23:59:59Z')
 
-        # 2. Fetch the satellite image from Sentinel Hub
+        # 2. Fetch the satellite image from Sentinel Hub using our working approach
         print(
             f"Fetching Sentinel Hub image for BBox: {bbox} on {analysis_date.isoformat()}")
         tiff_data_bytes = fetch_sentinel_image(bbox, time_interval)
-        if tiff_data_bytes.size == 0:
+        if len(tiff_data_bytes) == 0:
             raise gr.Error(
                 "Failed to fetch data from Sentinel Hub. The area might be cloudy or no data is available.")
 
