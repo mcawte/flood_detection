@@ -72,12 +72,12 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
         raise gr.Error(
             "Sentinel Hub credentials (SH_CLIENT_ID, SH_CLIENT_SECRET) are not set.")
 
+    SHConfig.reset()
     config = SHConfig(
         sh_client_id=SH_CLIENT_ID,
         sh_client_secret=SH_CLIENT_SECRET,
+        sh_base_url="https://sh.dataspace.copernicus.eu"
     )
-
-    config.sh_base_url = "https://sh.dataspace.copernicus.eu"
 
     # Updated evalscript with correct Copernicus Dataspace dataset identifiers
     evalscript = """
@@ -85,57 +85,25 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
         function setup() {
             return {
                 input: [
-                    {
-                        datasource: "sentinel-2-l2a",  // Changed from "S2L2A"
-                        bands: ["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
-                        units: "REFLECTANCE"
-                    },
-                    {
-                        datasource: "sentinel-1-grd",  // Changed from "S1GRD"
-                        bands: ["VV", "VH"],
-                        units: "LINEAR"
-                    }
+                    { datasource: "S2L2A", bands: ["B02","B03","B04","B8A","B11","B12","SCL"], units: "REFLECTANCE" },
+                    { datasource: "S1GRD", bands: ["VV", "VH"], units: "LINEAR" }
                 ],
-                output: {
-                    bands: 9,
-                    sampleType: "FLOAT32"
-                },
+                output: { bands: 9, sampleType: "FLOAT32" },
                 mosaicking: "ORBIT"
             };
         }
-
-        // Helper function to normalize and clip Sentinel-1 data
         function toDb(linear) {
-            if (linear === 0) return -35.0; // Avoid log(0)
+            if (linear === 0) return -35.0;
             let db = 10 * Math.log10(linear);
-            return Math.max(-35.0, Math.min(10.0, db)); // Clip between -35 and 10
+            return Math.max(-35.0, Math.min(10.0, db));
         }
-
         function evaluatePixel(samples) {
-            // Sentinel-2 samples are already scaled to surface reflectance
-            let s2 = samples["sentinel-2-l2a"][0];  // Updated reference
-
-            // Sentinel-1 samples need normalization
-            let s1 = samples["sentinel-1-grd"][0];  // Updated reference
+            let s2 = samples.S2L2A[0];
+            let s1 = samples.S1GRD[0];
             let vv_db = toDb(s1.VV);
             let vh_db = toDb(s1.VH);
-
-            // Cloud mask from Scene Classification Layer (SCL)
-            // Values 8, 9, 10 = medium/high probability clouds, cirrus
             let cloudMask = (s2.SCL == 8 || s2.SCL == 9 || s2.SCL == 10) ? 1.0 : 0.0;
-
-            // Return the 9 bands in the correct order required by the model
-            return [
-                s2.B02,      // Blue
-                s2.B03,      // Green
-                s2.B04,      // Red
-                s2.B8A,      // Narrow NIR
-                s2.B11,      // SWIR 1
-                s2.B12,      // SWIR 2
-                vv_db,       // VV (normalized)
-                vh_db,       // VH (normalized)
-                cloudMask
-            ];
+            return [ s2.B02, s2.B03, s2.B04, s2.B8A, s2.B11, s2.B12, vv_db, vh_db, cloudMask ];
         }
     """
 
