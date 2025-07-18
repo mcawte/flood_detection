@@ -72,7 +72,6 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
         raise gr.Error(
             "Sentinel Hub credentials (SH_CLIENT_ID, SH_CLIENT_SECRET) are not set.")
 
-    SHConfig.reset()
     config = SHConfig(
         sh_client_id=SH_CLIENT_ID,
         sh_client_secret=SH_CLIENT_SECRET,
