@@ -77,6 +77,8 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
         sh_client_secret=SH_CLIENT_SECRET,
     )
 
+    config.sh_base_url = "https://sh.dataspace.copernicus.eu"
+
     # This evalscript requests bands from both S1 and S2 and creates the cloud mask
     evalscript = """
         //VERSION=3
@@ -85,13 +87,13 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
                 input: [
                     {
                         datasource: "S2L2A",
-                        bands: ["B02", "B03", "B04", "B08", "B11", "B12", "SCL"],
-                        units: "DN"
+                        bands: ["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
+                        units: "REFLECTANCE" // Request surface reflectance directly
                     },
                     {
                         datasource: "S1GRD",
                         bands: ["VV", "VH"],
-                        units: "LINEAR"
+                        units: "LINEAR" // Request linear backscatter (sigma0)
                     }
                 ],
                 output: {
@@ -102,27 +104,36 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
             };
         }
 
+        // Helper function to normalize and clip Sentinel-1 data
+        function toDb(linear) {
+            if (linear === 0) return -35.0; // Avoid log(0)
+            let db = 10 * Math.log10(linear);
+            return Math.max(-35.0, Math.min(10.0, db)); // Clip between -35 and 10
+        }
+
         function evaluatePixel(samples) {
-            // Get Sentinel-2 bands
+            // Sentinel-2 samples are already scaled to surface reflectance
             let s2 = samples.S2L2A[0];
 
-            // Get Sentinel-1 bands
+            // Sentinel-1 samples need normalization
             let s1 = samples.S1GRD[0];
+            let vv_db = toDb(s1.VV);
+            let vh_db = toDb(s1.VH);
 
-            // Create the cloud mask from the Scene Classification Layer (SCL)
-            // SCL values 8, 9, 10 correspond to medium/high probability clouds and cirrus
+            // Cloud mask from Scene Classification Layer (SCL)
+            // Values 8, 9, 10 = medium/high probability clouds, cirrus
             let cloudMask = (s2.SCL == 8 || s2.SCL == 9 || s2.SCL == 10) ? 1.0 : 0.0;
 
-            // Return the 9 bands in the correct order
+            // Return the 9 bands in the correct order required by the model
             return [
-                s2.B02,
-                s2.B03,
-                s2.B04,
-                s2.B08,
-                s2.B11,
-                s2.B12,
-                s1.VV,
-                s1.VH,
+                s2.B02,      // Blue
+                s2.B03,      // Green
+                s2.B04,      // Red
+                s2.B8A,      // Narrow NIR
+                s2.B11,      // SWIR 1
+                s2.B12,      // SWIR 2
+                vv_db,       // VV (normalized)
+                vh_db,       // VH (normalized)
                 cloudMask
             ];
         }
@@ -131,28 +142,27 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
     request = SentinelHubRequest(
         evalscript=evalscript,
         input_data=[
-            # Define the two data sources for the evalscript
             SentinelHubRequest.input_data(
                 data_collection=DataCollection.SENTINEL2_L2A,
                 time_interval=time_interval,
                 mosaicking_order='leastCC'
             ),
+            # Use SENTINEL1_GRD for Sentinel-1 Ground Range Detected data
             SentinelHubRequest.input_data(
-                data_collection=DataCollection.SENTINEL1,
+                data_collection=DataCollection.SENTINEL1_GRD,
                 time_interval=time_interval,
             )
         ],
         responses=[SentinelHubRequest.output_response(
             "default", MimeType.TIFF)],
         bbox=BBox(bbox=bbox, crs=CRS.WGS84),
-        size=[512, 512],  # The model was trained on 512x512 images
+        size=[512, 512],
         config=config,
     )
 
-    # The request will return a list of results, we take the first one
     results = request.get_data()
     if not results:
-        return b''  # Return empty bytes if no data was found
+        return b''
     return results[0]
 
 
