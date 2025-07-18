@@ -79,21 +79,21 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
 
     config.sh_base_url = "https://sh.dataspace.copernicus.eu"
 
-    # This evalscript requests bands from both S1 and S2 and creates the cloud mask
+    # Updated evalscript with correct Copernicus Dataspace dataset identifiers
     evalscript = """
         //VERSION=3
         function setup() {
             return {
                 input: [
                     {
-                        datasource: "S2L2A",
+                        datasource: "sentinel-2-l2a",  // Changed from "S2L2A"
                         bands: ["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
-                        units: "REFLECTANCE" // Request surface reflectance directly
+                        units: "REFLECTANCE"
                     },
                     {
-                        datasource: "S1GRD",
+                        datasource: "sentinel-1-grd",  // Changed from "S1GRD"
                         bands: ["VV", "VH"],
-                        units: "LINEAR" // Request linear backscatter (sigma0)
+                        units: "LINEAR"
                     }
                 ],
                 output: {
@@ -113,10 +113,10 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
 
         function evaluatePixel(samples) {
             // Sentinel-2 samples are already scaled to surface reflectance
-            let s2 = samples.S2L2A[0];
+            let s2 = samples["sentinel-2-l2a"][0];  // Updated reference
 
             // Sentinel-1 samples need normalization
-            let s1 = samples.S1GRD[0];
+            let s1 = samples["sentinel-1-grd"][0];  // Updated reference
             let vv_db = toDb(s1.VV);
             let vh_db = toDb(s1.VH);
 
@@ -147,7 +147,6 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
                 time_interval=time_interval,
                 mosaicking_order='leastCC'
             ),
-            # Use SENTINEL1_GRD for Sentinel-1 Ground Range Detected data
             SentinelHubRequest.input_data(
                 data_collection=DataCollection.SENTINEL1,
                 time_interval=time_interval,
