@@ -15,6 +15,7 @@ import rasterio
 from rasterio.transform import from_bounds
 import io
 from sentinelhub import SHConfig, BBox, CRS, DataCollection, SentinelHubRequest, MimeType
+from datetime import datetime, timedelta
 
 
 # Define fixed paths from your container setup
@@ -67,36 +68,39 @@ def upload_to_minio(file_path: str, object_name: str) -> str:
         raise gr.Error(f"Failed to upload result to MinIO: {e}")
 
 
-def fetch_sentinel2_data(bbox: tuple, time_interval: tuple, config: SHConfig) -> np.ndarray:
-    """Fetch Sentinel-2 data separately, returning UINT16 values."""
-    print("🛰️  Fetching Sentinel-2 data as UINT16...")
+def fetch_sentinel2_data(bbox: tuple, time_interval: tuple, config: SHConfig):
+    """Fetch Sentinel-2 data separately"""
+    print("🛰️  Fetching Sentinel-2 data...")
 
-    # This evalscript gets the 6 S2 bands and the cloud mask
-    evalscript_s2 = """
-        //VERSION=3
-        function setup() {
-            return {
-                input: ["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
-                output: { 
-                    bands: 7, 
-                    sampleType: "UINT16" // Request original scaled integers
-                }
-            };
-        }
-        function evaluatePixel(sample) {
-            let cloudMask = (sample.SCL == 8 || sample.SCL == 9 || sample.SCL == 10) ? 1 : 0;
-            // Return the raw digital numbers (DNs)
-            return [sample.B02, sample.B03, sample.B04, sample.B8A, sample.B11, sample.B12, cloudMask];
-        }
+    evalscript = """
+    //VERSION=3
+    function setup() {
+      return {
+        input: ["B02","B03","B04","B8A","B11","B12","SCL"],
+        output: { bands: 7, sampleType: "FLOAT32" }
+      };
+    }
+    function evaluatePixel(s) {
+      // cloud = 1 when SCL = 8,9,10, otherwise 0
+      const cloud = (s.SCL == 8 || s.SCL == 9 || s.SCL == 10) ? 1 : 0;
+      return [s.B02, s.B03, s.B04, s.B8A, s.B11, s.B12, cloud];
+    }
     """
 
     request = SentinelHubRequest(
-        evalscript=evalscript_s2,
+        evalscript=evalscript,
         input_data=[
             SentinelHubRequest.input_data(
                 data_collection=DataCollection.SENTINEL2_L2A,
                 time_interval=time_interval,
-                mosaicking_order='leastCC'
+                other_args={
+                    "dataFilter": {           # <-- only that granule
+                        "tileId": {"$eq": "30UXE"}
+                    },
+                    "processing": {
+                        "mosaickingOrder": "mostRecent"  # guarantees one scene
+                    }
+                }
             )
         ],
         responses=[SentinelHubRequest.output_response(
@@ -106,10 +110,15 @@ def fetch_sentinel2_data(bbox: tuple, time_interval: tuple, config: SHConfig) ->
         config=config,
     )
 
+    url_list = request.get_url_list()
+    if url_list:
+        print(
+            f"✅ Requesting from actual URL endpoint: {url_list[0].split('?')[0]}...")
+
     return request.get_data()[0]
 
 
-def fetch_sentinel1_data(bbox: tuple, time_interval: tuple, config: SHConfig) -> np.ndarray:
+def fetch_sentinel1_data(bbox: tuple, time_interval: tuple, config: SHConfig):
     """Fetch Sentinel-1 data separately"""
     print("🛰️  Fetching Sentinel-1 data...")
 
@@ -122,7 +131,7 @@ def fetch_sentinel1_data(bbox: tuple, time_interval: tuple, config: SHConfig) ->
             };
         }
         function toDb(linear) {
-            if (linear === 0) return -35.0;
+            if (!isFinite(linear) || linear <= 0) return -35.0;
             let db = 10 * Math.log10(linear);
             return Math.max(-35.0, Math.min(10.0, db));
         }
@@ -137,6 +146,13 @@ def fetch_sentinel1_data(bbox: tuple, time_interval: tuple, config: SHConfig) ->
             SentinelHubRequest.input_data(
                 data_collection=DataCollection.SENTINEL1_IW,
                 time_interval=time_interval,
+                other_args={
+                    "dataFilter": {
+                        # "orbitDirection": "ASCENDING",
+                        "relativeOrbit": 137           # relative orbit of the EMSR scene
+                    },
+                    "processing": {"mosaickingOrder": "mostRecent"}
+                },
             )
         ],
         responses=[SentinelHubRequest.output_response(
@@ -159,25 +175,20 @@ def combine_sentinel_data(s2_data: np.ndarray, s1_data: np.ndarray, bbox: tuple)
     if s1_data.shape == (512, 512, 2):
         s1_data = s1_data.transpose(2, 0, 1)
 
-    s2_spectral_bands = s2_data[:6, :, :]
-    cloud_mask_band = s2_data[6:, :, :]
+    s1_float = s1_data
+    s2_scaled = (s2_data[:6] * 10000).astype(np.float64)  # bands 1‑6
+    cloud_band = s2_data[6].astype(
+        np.float64)             # band 7, keep 0/1
+    s2_float = np.concatenate([s2_scaled, cloud_band[None, ...]])
 
-    # Convert S2 and cloud mask bands to float32 to match S1's type
-    s2_spectral_bands_float = s2_spectral_bands.astype(np.float32)
-    cloud_mask_band_float = cloud_mask_band.astype(np.float32)
-
-    # s1_data is already float32 from the evalscript
-
-    # Combine in the correct order: S2 (6), S1 (2), Cloud (1)
     combined_array = np.concatenate(
-        [s2_spectral_bands_float, s1_data, cloud_mask_band_float], axis=0
-    )
+        [s1_float, s2_float], axis=0)
     print(
         f"🔍 Combined array shape: {combined_array.shape}, dtype: {combined_array.dtype}")
 
     profile = {
         'driver': 'GTiff',
-        'dtype': 'float32',  # Ensure output is float32 to handle S1's negative values
+        'dtype': 'float64',
         'width': 512,
         'height': 512,
         'count': 9,
@@ -195,7 +206,7 @@ def combine_sentinel_data(s2_data: np.ndarray, s1_data: np.ndarray, bbox: tuple)
         return buffer.read()
 
 
-def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
+def fetch_sentinel_image(bbox: tuple, target_date: datetime) -> bytes:
     """
     Fetches a 9-band TIFF image combining Sentinel-2 L2A, a cloud mask,
     and Sentinel-1 GRD data, as expected by the flood detection model.
@@ -214,10 +225,15 @@ def fetch_sentinel_image(bbox: tuple, time_interval: tuple) -> bytes:
 
     print(f"✅ Using Copernicus Data Space Ecosystem: {config.sh_base_url}")
 
+    optical_interval = (f"{(target_date - timedelta(days=5)).strftime('%Y-%m-%d')}T00:00:00Z",
+                        f"{target_date.strftime('%Y-%m-%d')}T23:59:59Z")
+    radar_interval = (f"{target_date.strftime('%Y-%m-%d')}T06:00:00Z",
+                      f"{target_date.strftime('%Y-%m-%d')}T06:30:00Z")
+
     try:
         # Fetch data separately using the working approach
-        s2_data = fetch_sentinel2_data(bbox, time_interval, config)
-        s1_data = fetch_sentinel1_data(bbox, time_interval, config)
+        s2_data = fetch_sentinel2_data(bbox, optical_interval, config)
+        s1_data = fetch_sentinel1_data(bbox, radar_interval, config)
 
         if s2_data is None:
             raise gr.Error("No Sentinel-2 data returned from Copernicus")
@@ -471,13 +487,11 @@ def fetch_and_run_flood_detection(bbox_str: str, analysis_date_timestamp: float)
             raise ValueError(
                 "Bounding Box must have 4 comma-separated values: min_lon, min_lat, max_lon, max_lat")
         bbox = tuple(bbox_parts)
-        time_interval = (analysis_date.isoformat() + 'T00:00:00Z',
-                         analysis_date.isoformat() + 'T23:59:59Z')
 
         # 2. Fetch the satellite image from Sentinel Hub using our working approach
         print(
             f"Fetching Sentinel Hub image for BBox: {bbox} on {analysis_date.isoformat()}")
-        tiff_data_bytes = fetch_sentinel_image(bbox, time_interval)
+        tiff_data_bytes = fetch_sentinel_image(bbox, analysis_date)
         if len(tiff_data_bytes) == 0:
             raise gr.Error(
                 "Failed to fetch data from Sentinel Hub. The area might be cloudy or no data is available.")
