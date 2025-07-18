@@ -68,25 +68,30 @@ def upload_to_minio(file_path: str, object_name: str) -> str:
 
 
 def fetch_sentinel2_data(bbox: tuple, time_interval: tuple, config: SHConfig) -> np.ndarray:
-    """Fetch Sentinel-2 data separately"""
-    print("🛰️  Fetching Sentinel-2 data...")
+    """Fetch Sentinel-2 data separately, returning UINT16 values."""
+    print("🛰️  Fetching Sentinel-2 data as UINT16...")
 
-    evalscript = """
+    # This evalscript gets the 6 S2 bands and the cloud mask
+    evalscript_s2 = """
         //VERSION=3
         function setup() {
             return {
                 input: ["B02", "B03", "B04", "B8A", "B11", "B12", "SCL"],
-                output: { bands: 7, sampleType: "FLOAT32" }
+                output: { 
+                    bands: 7, 
+                    sampleType: "UINT16" // Request original scaled integers
+                }
             };
         }
         function evaluatePixel(sample) {
-            let cloudMask = (sample.SCL == 8 || sample.SCL == 9 || sample.SCL == 10) ? 1.0 : 0.0;
+            let cloudMask = (sample.SCL == 8 || sample.SCL == 9 || sample.SCL == 10) ? 1 : 0;
+            // Return the raw digital numbers (DNs)
             return [sample.B02, sample.B03, sample.B04, sample.B8A, sample.B11, sample.B12, cloudMask];
         }
     """
 
     request = SentinelHubRequest(
-        evalscript=evalscript,
+        evalscript=evalscript_s2,
         input_data=[
             SentinelHubRequest.input_data(
                 data_collection=DataCollection.SENTINEL2_L2A,
@@ -145,44 +150,44 @@ def fetch_sentinel1_data(bbox: tuple, time_interval: tuple, config: SHConfig) ->
 
 
 def combine_sentinel_data(s2_data: np.ndarray, s1_data: np.ndarray, bbox: tuple) -> bytes:
-    """Combine Sentinel-1 and Sentinel-2 data into a single 9-band TIFF and return as bytes"""
+    """Combine Sentinel-1 (float32) and Sentinel-2 (uint16) data into a single 9-band float32 TIFF."""
     print("🔧 Combining Sentinel-1 and Sentinel-2 data...")
 
-    # The data comes in (height, width, bands) format, need to transpose to (bands, height, width)
+    # Transpose to (bands, height, width)
     if s2_data.shape == (512, 512, 7):
-        s2_data = s2_data.transpose(2, 0, 1)  # (7, 512, 512)
+        s2_data = s2_data.transpose(2, 0, 1)
     if s1_data.shape == (512, 512, 2):
-        s1_data = s1_data.transpose(2, 0, 1)  # (2, 512, 512)
+        s1_data = s1_data.transpose(2, 0, 1)
 
-    print(f"🔍 Transposed S2: {s2_data.shape}")
-    print(f"🔍 Transposed S1: {s1_data.shape}")
+    s2_spectral_bands = s2_data[:6, :, :]
+    cloud_mask_band = s2_data[6:, :, :]
 
-    # 1. Isolate the actual spectral bands from the cloud mask
-    s2_spectral_bands = s2_data[:6, :, :]      # First 6 bands are spectral
-    cloud_mask_band = s2_data[6:, :, :]  # The 7th band is the cloud mask
+    # Convert S2 and cloud mask bands to float32 to match S1's type
+    s2_spectral_bands_float = s2_spectral_bands.astype(np.float32)
+    cloud_mask_band_float = cloud_mask_band.astype(np.float32)
 
-    # 2. Combine in the correct order: S2 (6), S1 (2), Cloud (1)
+    # s1_data is already float32 from the evalscript
+
+    # Combine in the correct order: S2 (6), S1 (2), Cloud (1)
     combined_array = np.concatenate(
-        [s2_spectral_bands, s1_data, cloud_mask_band], axis=0
+        [s2_spectral_bands_float, s1_data, cloud_mask_band_float], axis=0
     )
-    print(f"🔍 Combined array shape: {combined_array.shape}")
+    print(
+        f"🔍 Combined array shape: {combined_array.shape}, dtype: {combined_array.dtype}")
 
-    # Create a TIFF profile
     profile = {
         'driver': 'GTiff',
-        'dtype': 'float32',
+        'dtype': 'float32',  # Ensure output is float32 to handle S1's negative values
         'width': 512,
         'height': 512,
         'count': 9,
         'crs': 'EPSG:4326'
     }
 
-    # Create transform from bbox
     west, south, east, north = bbox
     transform = from_bounds(west, south, east, north, 512, 512)
     profile['transform'] = transform
 
-    # Write to memory buffer and return as bytes
     with io.BytesIO() as buffer:
         with rasterio.open(buffer, 'w', **profile) as dst:
             dst.write(combined_array)
